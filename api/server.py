@@ -502,7 +502,37 @@ async def api_dedup(threshold: float = 0.85, dry_run: bool = False):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.5.0", "agents": 9, "features": ["memory", "graph", "learn", "execute", "recover", "dashboard", "export", "dedup", "notify"]}
+    return {"status": "ok", "version": "0.6.0", "agents": 9, "features": ["memory", "graph", "learn", "execute", "recover", "dashboard", "export", "dedup", "notify", "timeline", "plugins"]}
+
+
+@app.get("/timeline")
+async def api_timeline(days: int = 30, project: str = ""):
+    """Get chronological timeline of memories and executions."""
+    config = load_config()
+    engine = await get_engine(config)
+    from core.timeline import TimelineGenerator
+    gen = TimelineGenerator(engine)
+    if project:
+        return await gen.get_project_timeline(project=project, days=days)
+    return await gen.get_full_timeline(days=days)
+
+
+@app.get("/plugins")
+async def api_plugins():
+    """Get plugin manager status."""
+    from core.plugin_manager import PluginManager
+    manager = PluginManager()
+    await manager.discover()
+    return manager.status
+
+
+@app.get("/model-status")
+async def api_model_status():
+    """Get model router health and provider status."""
+    from core.model_router import ModelRouter
+    config = load_config()
+    router = ModelRouter(config)
+    return router.status
 
 
 # ── Main ─────────────────────────────────────

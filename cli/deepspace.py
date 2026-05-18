@@ -27,7 +27,7 @@ from core.models import MemoryLayer, MemoryType
 from storage.pgvector_store import PgVectorStore, create_store
 from storage.neo4j_store import Neo4jGraphStore, create_graph_store
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 console = Console()
 logger = logging.getLogger("deepspace")
@@ -1284,6 +1284,88 @@ def logs(ctx, follow, lines, level):
         console.print(f"[dim]Level filter: {level} | Use -f to follow live[/]\n")
         for line in shown:
             console.print(style_line(line))
+
+
+@cli.command()
+@click.option("--days", "-d", default=30, help="Days to include")
+@click.option("--project", "-p", default=None, help="Filter by project")
+@click.pass_context
+def timeline(ctx, days, project):
+    """View a chronological timeline of memories and executions."""
+    async def _run():
+        from core.timeline import TimelineGenerator
+        config = load_config(ctx.obj["config_path"])
+        engine = await init_engine(config)
+        gen = TimelineGenerator(engine)
+        json_out = ctx.obj.get("json_output")
+
+        result = await gen.get_project_timeline(project, days) if project else await gen.get_full_timeline(days)
+
+        if json_out:
+            console.print_json(json.dumps(result, default=str))
+            return
+
+        console.print(f"\n[bold]Timeline:[/] {result.get('days',0)} days, {result.get('total_events',0)} events")
+        if project:
+            console.print(f"Project: {project} | {result.get('first_activity','')} → {result.get('last_activity','')}")
+            for ms in (result.get('milestones') or [])[:5]:
+                console.print(f"  • {ms['date'][:10]} [{ms['importance']:.2f}] {ms['title'][:80]}")
+
+        for day in (result.get('timeline') or [])[:14]:
+            m = day.get('memories',0); e = day.get('executions',0)
+            bar = '█' * min(m, 15) + ('▒' * min(e, 8))
+            console.print(f"  {day['date']}  [dim]{bar}[/] ({m}m, {e}e)")
+
+    asyncio.run(_run())
+
+
+@cli.command()
+@click.argument("action", type=click.Choice(["list", "enable", "disable", "reload"]))
+@click.argument("plugin_name", required=False)
+@click.pass_context
+def plugins(ctx, action, plugin_name):
+    """Manage DeepSpace plugins."""
+    from core.plugin_manager import PluginManager
+    import asyncio as _asyncio
+
+    manager = PluginManager()
+    if action == "list":
+        manifests = _asyncio.run(manager.discover())
+        if not manifests:
+            console.print("[yellow]No plugins found.[/]\n[dim]Create: plugins/<name>/plugin.json[/]")
+            return
+        table = Table(title="Plugins")
+        table.add_column("Name"); table.add_column("Version"); table.add_column("Description"); table.add_column("Provides")
+        for m in manifests: table.add_row(m.name, m.version, m.description[:40], ", ".join(m.provides[:3]))
+        console.print(table)
+    elif action == "reload":
+        with console.status("[bold]Reloading plugins...[/]"):
+            _asyncio.run(manager.load_all()); _asyncio.run(manager.enable_all())
+        console.print(f"[green]Loaded {len(manager.plugins)} plugin(s)[/]")
+    elif action == "enable":
+        _asyncio.run(manager.load_all())
+        ok = _asyncio.run(manager.enable_plugin(plugin_name)) if plugin_name else True
+        console.print(f"[{'green]Enabled' if ok else 'red]Not found'}[/]")
+    elif action == "disable":
+        ok = _asyncio.run(manager.disable_plugin(plugin_name)) if plugin_name else True
+        console.print(f"[green]Disabled[/]")
+
+
+@cli.command()
+@click.pass_context
+def model_status(ctx):
+    """Show model router health and provider status."""
+    from core.model_router import ModelRouter
+    config = load_config(ctx.obj["config_path"])
+    router = ModelRouter(config)
+    st = router.status
+    if ctx.obj.get("json_output"):
+        console.print_json(json.dumps(st))
+        return
+    console.print(f"[bold]Model Status:[/] {st['healthy_providers']}/{st['total_providers']} healthy")
+    for p in st["providers"]:
+        h = "[green]OK[/]" if p["healthy"] else "[red]DOWN[/]"
+        console.print(f"  {p['name']}: {h}  fail_rate={p['failure_rate']:.2%}  calls={p['total_calls']}")
 
 
 @cli.command()

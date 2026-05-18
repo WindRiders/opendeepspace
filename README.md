@@ -1,13 +1,13 @@
 # DeepSpace —   Autonomous Learning Memory System
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-133%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-143%20passed-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-85%25-green" alt="Coverage">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
-  <img src="https://img.shields.io/badge/version-0.5.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.6.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/agents-9-orange" alt="Agents">
-  <img src="https://img.shields.io/badge/commands-26-brightgreen" alt="Commands">
+  <img src="https://img.shields.io/badge/commands-29-brightgreen" alt="Commands">
 </p>
 
 > 一个基于大模型的自主学习记忆系统。**观察你的工作，构建知识图谱，自主学习，主动推送，自主解决问题。**
