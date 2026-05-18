@@ -2,7 +2,23 @@
 
 All notable changes to DeepSpace will be documented in this file.
 
-## [0.4.0] - 2026-05-18
+## [0.5.0] - 2026-05-18
+
+### Added
+
+- **Desktop Notifications**: Cross-platform native OS notifications (macOS/Linux/Windows) with fallback to log file
+- **D3.js Graph Visualization**: Force-directed knowledge graph explorer in Web Dashboard
+- **WebSocket Live Dashboard**: Real-time connection indicator, auto-refresh on orchestrator events
+- **`--json` Output**: All CLI commands support `--json/-j` for machine-readable output
+- **Memory Deduplication**: `deepspace dedup` — LLM-based semantic similarity detection and auto-merge
+- **Notifier Integration**: Proactive push triggers desktop notifications automatically
+
+### Changed
+
+- Dashboard completely redesigned with D3.js, WebSocket live updates, and graph visualization
+- Version bumped to 0.5.0
+- README revamped with feature table and updated description
+- 133 unit tests (up from 122)
 
 ### Added
 

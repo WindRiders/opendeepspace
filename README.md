@@ -1,17 +1,34 @@
 # DeepSpace —   Autonomous Learning Memory System
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-105%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-133%20passed-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-85%25-green" alt="Coverage">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
   <img src="https://img.shields.io/badge/version-0.5.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/agents-9-orange" alt="Agents">
+  <img src="https://img.shields.io/badge/commands-26-brightgreen" alt="Commands">
 </p>
 
-> 一个基于大模型的自主学习记忆系统。四层记忆模型 + 知识图谱 + 自主学习 + 主动预判。
+> 一个基于大模型的自主学习记忆系统。**观察你的工作，构建知识图谱，自主学习，主动推送，自主解决问题。**
 
-DeepSpace 是一个运行在后台的 AI 记忆引擎。它观察你的工作、构建知识图谱、在空闲时自主学习、预判你的需求并主动推送相关信息。
+DeepSpace 是一个运行在后台的 AI 记忆引擎。它不只是记住你说过什么——它会**主动思考**你还需要什么，**自己研究**知识空白，**自动执行**解决方案，然后**推送通知**告诉你结果。
+
+##   What's New in v0.5.0
+
+| 功能 | 说明 |
+|------|------|
+|   Web Dashboard | `http://localhost:8645/dashboard` — 4个标签页，D3.js图谱可视化，WebSocket实时更新 |
+|   Desktop Notifications | macOS/Linux/Windows 原生通知，主动推送直达桌面 |
+|   Autonomous Execution | `deepspace solve "目标"` — Goal→Plan→Execute→Verify→Learn 闭环 |
+|   Self-Derived Goals | `deepspace auto-solve` — 从知识空白自动推导并执行目标 |
+|   Autonomous Recovery | 执行失败自动研究修复、重试（最多2次） |
+|   Export/Import | JSON/Markdown 格式导出导入记忆 |
+|   Memory Dedup | LLM语义去重，自动合并重复记忆 |
+|   Shell Completion | bash/zsh/fish Tab 补全 |
+|   Interactive Init | `deepspace init` — 6步向导，3分钟从零到运行 |
+|   Log Viewer | `deepspace logs -f` — 实时日志 + 彩色 + 分级过滤 |
+|   Docker Support | `docker run windriders/opendeepspace` — 一键启动 |
 
 ## 核心理念
 

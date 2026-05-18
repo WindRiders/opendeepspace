@@ -11,7 +11,29 @@
 
 DeepSpace 是一个运行在后台的 AI 记忆引擎。它观察你的工作、构建知识图谱、在空闲时自主学习、预判你的需求并主动推送相关信息。
 
-### 核心理念
+### 核心能力矩阵
+
+| 能力 | 命令 | 状态 |
+|------|------|------|
+| 记忆存储 | `deepspace remember` | ✅ |
+| 混合检索 | `deepspace recall` | ✅ |
+| 元认知反思 | `deepspace reflect` | ✅ |
+| 记忆巩固 | `deepspace consolidate` | ✅ |
+| 知识图谱 | `deepspace graph/neighbors` | ✅ |
+| 自主学习 | `deepspace learn` | ✅ |
+| 预判推送 | `deepspace predict/push` | ✅ |
+| 每日简报 | `deepspace briefing` | ✅ |
+| 自主执行 | `deepspace solve` | ✅ v0.3 |
+| 自推导目标 | `deepspace auto-solve` | ✅ v0.4 |
+| Web Dashboard | `http://localhost:8645/dashboard` | ✅ v0.5 |
+| 桌面通知 | 自动推送 | ✅ v0.5 |
+| 导出导入 | `deepspace export/import-memories` | ✅ v0.4 |
+| 记忆去重 | `deepspace dedup` | ✅ v0.5 |
+| 日志查看 | `deepspace logs -f` | ✅ v0.4 |
+| Shell 补全 | `deepspace completion` | ✅ v0.3 |
+| 配置向导 | `deepspace init` | ✅ v0.3 |
+| Docker 部署 | `docker run windriders/opendeepspace` | ✅ v0.3 |
+| 执行历史 | `deepspace executions` | ✅ v0.4 |
 
 传统的笔记和记忆工具是被动的 — 你必须手动录入、手动检索。DeepSpace 是主动的：
 
