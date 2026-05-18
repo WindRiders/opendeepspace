@@ -130,6 +130,17 @@ async def lifespan(app: FastAPI):
                     break
 
     await init_app(config)
+    # Auto-load plugins on startup
+    try:
+        from core.plugin_manager import PluginManager
+        pm = PluginManager()
+        await pm.discover()
+        if pm.plugins or True:
+            await pm.load_all()
+            await pm.enable_all()
+            logger.info(f"Plugins auto-loaded: {len(pm.plugins)} enabled")
+    except Exception as e:
+        logger.debug(f"Plugin auto-load skipped: {e}")
     logger.info("DeepSpace API server started")
     yield
     # Shutdown
@@ -571,7 +582,9 @@ async def api_timeline(days: int = 30, project: str = ""):
     config = load_config()
     engine = await get_engine(config)
     from core.timeline import TimelineGenerator
-    gen = TimelineGenerator(engine)
+    from core.orchestrator import Orchestrator
+    orch = Orchestrator(engine, engine.llm, config)
+    gen = TimelineGenerator(engine, orchestrator=orch)
     if project:
         return await gen.get_project_timeline(project=project, days=days)
     return await gen.get_full_timeline(days=days)

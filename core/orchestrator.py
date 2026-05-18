@@ -678,7 +678,27 @@ class Orchestrator:
         """Stop the orchestrator and all sub-agents."""
         self._running = False
         self.learner.stop()
+        if hasattr(self.llm, 'router'):
+            self.llm.router.stop_health_checks()
         logger.info("Orchestrator stopped")
+
+    def _load_plugins(self):
+        """Auto-load plugins on startup."""
+        try:
+            from core.plugin_manager import PluginManager
+            import asyncio as _asyncio
+            manager = PluginManager()
+            manifests = _asyncio.run(manager.discover())
+            if manifests:
+                _asyncio.run(manager.load_all())
+                _asyncio.run(manager.enable_all())
+                # Register plugin handlers with executor
+                handlers = manager.get_all_execution_handlers()
+                if handlers:
+                    self.executor._plugin_handlers.update(handlers)
+                logger.info(f"Plugins loaded: {len(manager.plugins)} enabled, {len(handlers)} handlers registered")
+        except Exception as e:
+            logger.debug(f"Plugin auto-load skipped: {e}")
 
     # ── Autonomous Recovery (NEW) ──────────────
 
