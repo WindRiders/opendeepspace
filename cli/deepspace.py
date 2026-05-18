@@ -17,12 +17,16 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.markdown import Markdown
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich import print as rprint
 
 from core.llm_client import LLMClient
 from core.memory_engine import MemoryEngine
 from core.models import MemoryLayer, MemoryType
 from storage.pgvector_store import PgVectorStore, create_store
 from storage.neo4j_store import Neo4jGraphStore, create_graph_store
+
+VERSION = "0.3.0"
 
 console = Console()
 logger = logging.getLogger("deepspace")
@@ -77,11 +81,43 @@ async def init_engine(config: dict) -> MemoryEngine:
     return engine
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.option("--config", "-c", default="config/config.yaml", help="Config file path")
+@click.option("--version", "-V", is_flag=True, help="Show version and exit")
 @click.pass_context
-def cli(ctx, config):
-    """DeepSpace — Autonomous Learning Memory System."""
+def cli(ctx, config, version):
+    """DeepSpace —   Autonomous Learning Memory System.
+
+    Four-layer memory + Neo4j knowledge graph + autonomous learner
+    + proactive prediction + autonomous problem-solving.
+
+    Quick start:
+      deepspace init          # Interactive setup wizard
+      deepspace remember ...  # Store a memory
+      deepspace recall ...    # Search memories
+      deepspace solve ...     # Autonomous problem-solving
+
+    Docs: https://windriders.github.io/opendeepspace/
+    """
+    if version:
+        console.print(f"DeepSpace v{VERSION} — Autonomous Learning Memory System")
+        ctx.exit()
+
+    if ctx.invoked_subcommand is None:
+        # Show a friendly overview
+        console.print(Panel.fit(
+            f"[bold cyan]DeepSpace v{VERSION}[/] —   Autonomous Learning Memory System\n\n"
+            f"[dim]Four-layer memory + Neo4j knowledge graph + autonomous execution[/]\n\n"
+            f"[bold]Quick start:[/]  deepspace init\n"
+            f"[bold]Store:[/]      deepspace remember \"content\"\n"
+            f"[bold]Search:[/]     deepspace recall \"query\"\n"
+            f"[bold]Auto-solve:[/] deepspace solve \"goal\"\n"
+            f"[bold]Full auto:[/]  deepspace auto-solve\n\n"
+            f"[dim]Run 'deepspace --help' for all commands.[/]",
+            title="  Welcome",
+            border_style="blue",
+        ))
+
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config
 
@@ -451,69 +487,198 @@ def learn(ctx, once, interval):
 
 
 @cli.command()
+@click.option("--non-interactive", "-y", is_flag=True, help="Skip prompts, use defaults")
+@click.option("--api-key", default=None, help="DashScope API key (sk-...)")
 @click.pass_context
-def setup(ctx):
-    """Initialize DeepSpace: start Docker services and init DB."""
-    console.print("[bold]Setting up DeepSpace...[/]\n")
+def init(ctx, non_interactive, api_key):
+    """Interactive setup wizard — configure and start DeepSpace in one command.
 
-    # Check Docker
+    Detects Docker, configures API key, validates LLM connection,
+    starts databases, initializes schema. Everything needed to go
+    from zero to running.
+
+    Examples:
+      deepspace init              # Full interactive wizard
+      deepspace init -y           # Non-interactive with defaults
+      deepspace init --api-key sk-xxx  # Provide API key directly
+    """
     import subprocess
-    result = subprocess.run(["docker", "ps"], capture_output=True, text=True)
-    if result.returncode != 0:
-        console.print("[red]Docker is not running. Please start Docker first.[/]")
+    import time
+    import re
+
+    console.print(Panel.fit(
+        "[bold cyan]DeepSpace Setup Wizard[/]\n"
+        f"[dim]v{VERSION} — Autonomous Learning Memory System[/]",
+        border_style="cyan",
+    ))
+    console.print()
+
+    # ── Step 1: Check Python ──
+    console.print("[bold]1/6[/] Checking Python environment...", end=" ")
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if sys.version_info >= (3, 12):
+        console.print(f"[green]Python {py_ver} ✓[/]")
+    else:
+        console.print(f"[red]Python {py_ver} — need 3.12+[/]")
         return
 
-    # Start services
-    compose_file = Path.home() / "deepspace" / "docker-compose.yml"
-    if compose_file.exists():
-        console.print("Starting Docker services...")
-        subprocess.run(
-            ["docker", "compose", "-f", str(compose_file), "up", "-d"],
-            check=True,
-        )
-        console.print("[green]✓ Docker services started.[/]")
-    else:
-        console.print(f"[yellow]docker-compose.yml not found at {compose_file}[/]")
-
-    # Wait for PostgreSQL
-    console.print("Waiting for PostgreSQL...")
-    import time
-    for i in range(30):
-        result = subprocess.run(
-            ["docker", "exec", "deepspace-pg", "pg_isready", "-U", "deepspace"],
-            capture_output=True, text=True,
-        )
+    # ── Step 2: Detect Docker ──
+    console.print("[bold]2/6[/] Checking Docker...", end=" ")
+    docker_ok = False
+    try:
+        result = subprocess.run(["docker", "ps"], capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
-            console.print("[green]✓ PostgreSQL ready.[/]")
-            break
-        time.sleep(2)
+            docker_ok = True
+            console.print("[green]Docker running ✓[/]")
+        else:
+            console.print("[yellow]Docker installed but not running[/]")
+    except FileNotFoundError:
+        console.print("[red]Docker not found[/]")
+    except Exception:
+        console.print("[red]Docker unreachable[/]")
+
+    if not docker_ok:
+        console.print("\n[yellow]Docker is required for PostgreSQL + Neo4j.[/]")
+        console.print("[dim]Install: https://docs.docker.com/get-docker/[/]")
+        if not non_interactive:
+            if not click.confirm("Continue without Docker? (databases won't start)", default=False):
+                return
+
+    # ── Step 3: API Key ──
+    console.print("[bold]3/6[/] Configuring API key...")
+
+    # Try to detect from environment / config
+    detected_key = api_key or os.environ.get("DASHSCOPE_API_KEY", "")
+    if not detected_key or not detected_key.startswith("sk-"):
+        # Try Hermes config
+        hc = Path.home() / ".hermes" / "config.yaml"
+        if hc.exists():
+            try:
+                with open(hc) as f:
+                    hcfg = yaml.safe_load(f)
+                providers = hcfg.get("custom_providers", [])
+                if isinstance(providers, dict):
+                    providers = list(providers.values())
+                for p in providers:
+                    if isinstance(p, dict) and "dashscope" in p.get("base_url", ""):
+                        detected_key = p.get("api_key", "")
+                        break
+            except Exception:
+                pass
+
+    if detected_key and detected_key.startswith("sk-"):
+        masked = detected_key[:10] + "..." + detected_key[-4:]
+        console.print(f"  [green]Found: {masked} (from {'env' if api_key or os.environ.get('DASHSCOPE_API_KEY') else 'Hermes config'})[/]")
+    elif non_interactive:
+        console.print("  [yellow]No API key found. Set DASHSCOPE_API_KEY env var.[/]")
+        detected_key = ""
     else:
-        console.print("[red]PostgreSQL not ready after 60s.[/]")
+        console.print("  [dim]Get your key: https://dashscope.aliyun.com/[/]")
+        detected_key = click.prompt("  Enter DashScope API key", type=str, default="",
+                                     show_default=False).strip()
+        if not detected_key:
+            console.print("  [yellow]Skipped — set DASHSCOPE_API_KEY later.[/]")
 
-    # Wait for Neo4j
-    console.print("Waiting for Neo4j...")
-    for i in range(30):
-        result = subprocess.run(
-            ["docker", "exec", "deepspace-neo4j", "cypher-shell", "-u", "neo4j", "-p", "deepspace123", "RETURN 1"],
-            capture_output=True, text=True,
-        )
-        if result.returncode == 0:
-            console.print("[green]✓ Neo4j ready.[/]")
-            break
-        time.sleep(2)
+    # ── Step 4: Validate LLM connection ──
+    console.print("[bold]4/6[/] Validating LLM connection...", end=" ")
+    if detected_key and detected_key.startswith("sk-"):
+        try:
+            import urllib.request, json as _json
+            req = urllib.request.Request(
+                "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+                headers={"Authorization": f"Bearer {detected_key}"}
+            )
+            resp = urllib.request.urlopen(req, timeout=10)
+            data = _json.loads(resp.read())
+            model_count = len(data.get("data", []))
+            console.print(f"[green]Connected ({model_count} models available) ✓[/]")
+        except Exception as e:
+            console.print(f"[red]Failed: {e}[/]")
     else:
-        console.print("[yellow]Neo4j may still be starting. Run 'deepspace setup' again if needed.[/]")
+        console.print("[yellow]Skipped — no valid API key[/]")
 
-    # Init DB schema
-    console.print("Initializing database schema...")
-    async def _init_db():
-        config = load_config(ctx.obj["config_path"])
-        store = await create_store(config)
-        await store.init_schema()
-    asyncio.run(_init_db())
-    console.print("[green]✓ Database schema initialized.[/]")
+    # ── Step 5: Start databases ──
+    console.print("[bold]5/6[/] Starting databases...")
+    if docker_ok:
+        compose_file = Path("docker-compose.yml")
+        if not compose_file.exists():
+            compose_file = Path.home() / "deepspace" / "docker-compose.yml"
 
-    console.print("\n[bold green]DeepSpace setup complete![/]")
+        if compose_file.exists():
+            with console.status("[bold]Starting PostgreSQL + Neo4j containers...[/]"):
+                subprocess.run(
+                    ["docker", "compose", "-f", str(compose_file), "up", "-d"],
+                    capture_output=True, text=True, check=False,
+                )
+
+            # Wait for PostgreSQL
+            pg_ready = False
+            with console.status("[bold]Waiting for PostgreSQL...[/]"):
+                for _ in range(30):
+                    result = subprocess.run(
+                        ["docker", "exec", "deepspace-pg", "pg_isready", "-U", "deepspace"],
+                        capture_output=True, text=True,
+                    )
+                    if result.returncode == 0:
+                        pg_ready = True
+                        break
+                    time.sleep(2)
+
+            console.print(
+                f"  PostgreSQL: [{'green]ready ✓' if pg_ready else 'red]timeout'}"
+            )
+
+            # Wait for Neo4j
+            neo4j_ready = False
+            with console.status("[bold]Waiting for Neo4j...[/]"):
+                for _ in range(30):
+                    result = subprocess.run(
+                        ["docker", "exec", "deepspace-neo4j", "cypher-shell",
+                         "-u", "neo4j", "-p", "deepspace123", "RETURN 1"],
+                        capture_output=True, text=True,
+                    )
+                    if result.returncode == 0:
+                        neo4j_ready = True
+                        break
+                    time.sleep(2)
+
+            console.print(
+                f"  Neo4j:      [{'green]ready ✓' if neo4j_ready else 'red]timeout'}"
+            )
+
+            if not pg_ready or not neo4j_ready:
+                console.print("[yellow]Some databases may still be starting. Run 'deepspace init' again.[/]")
+        else:
+            console.print(f"  [yellow]docker-compose.yml not found at {compose_file}[/]")
+    else:
+        console.print("  [dim]Skipped — Docker not available[/]")
+
+    # ── Step 6: Init schema ──
+    console.print("[bold]6/6[/] Initializing database schema...", end=" ")
+    try:
+        async def _init_schema():
+            config = load_config(ctx.obj.get("config_path", "config/config.yaml"))
+            store = await create_store(config)
+            await store.init_schema()
+        asyncio.run(_init_schema())
+        console.print("[green]Ready ✓[/]")
+    except Exception as e:
+        console.print(f"[yellow]Failed: {e}[/]")
+        console.print("[dim]Databases may not be ready yet. Run 'deepspace init' again.[/]")
+
+    # ── Done ──
+    console.print()
+    console.print(Panel.fit(
+        "[bold green]DeepSpace is ready![/]\n\n"
+        "Try these commands:\n"
+        "  deepspace remember \"Hello DeepSpace\"\n"
+        "  deepspace recall \"Hello\"\n"
+        "  deepspace solve \"check system status\" -m plan_only\n"
+        "  deepspace serve\n\n"
+        f"[dim]Docs: https://windriders.github.io/opendeepspace/[/]",
+        title="  Setup Complete",
+        border_style="green",
+    ))
 
 
 @cli.command()
@@ -849,6 +1014,40 @@ def serve(ctx, port, host):
     console.print("[dim]Endpoints: /remember /recall /stats /reflect /graph/search /ws[/]")
     console.print("[dim]Press Ctrl+C to stop.[/]")
     uvicorn.run("api.server:app", host=host, port=port, reload=False, log_level="info")
+
+
+@cli.command()
+@click.pass_context
+def completion(ctx):
+    """Generate shell completion scripts for bash/zsh/fish.
+
+    Usage:
+      # Bash (add to ~/.bashrc):
+      eval "$(deepspace completion)"
+
+      # Zsh (add to ~/.zshrc):
+      eval "$(deepspace completion)"
+
+      # Fish (add to ~/.config/fish/config.fish):
+      deepspace completion | source
+
+    Or auto-install to system paths:
+      deepspace completion > ~/.local/share/bash-completion/completions/deepspace
+    """
+    import os
+    shell = os.environ.get("SHELL", "/bin/bash")
+
+    if "zsh" in shell:
+        from click.shell_completion import ZshComplete
+        comp = ZshComplete(cli, {}, "deepspace", "_DEEP_SPACE_COMPLETE")
+    elif "fish" in shell:
+        from click.shell_completion import FishComplete
+        comp = FishComplete(cli, {}, "deepspace", "_DEEP_SPACE_COMPLETE")
+    else:
+        from click.shell_completion import BashComplete
+        comp = BashComplete(cli, {}, "deepspace", "_DEEP_SPACE_COMPLETE")
+
+    console.print(comp.source())
 
 
 @cli.command()

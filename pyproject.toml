@@ -1,6 +1,6 @@
 [project]
-name = "deepspace"
-version = "0.1.0"
+name = "opendeepspace"
+version = "0.3.0"
 description = "DeepSpace — Autonomous Learning Memory System powered by LLM Agents"
 readme = "README.md"
 license = {text = "MIT"}

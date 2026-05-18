@@ -1,4 +1,13 @@
-# DeepSpace
+# DeepSpace —   Autonomous Learning Memory System
+
+<p align="center">
+  <img src="https://img.shields.io/badge/tests-105%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/coverage-85%25-green" alt="Coverage">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
+  <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python">
+  <img src="https://img.shields.io/badge/agents-9-orange" alt="Agents">
+</p>
 
 > 一个基于大模型的自主学习记忆系统。四层记忆模型 + 知识图谱 + 自主学习 + 主动预判。
 
@@ -48,11 +57,18 @@ DeepSpace 是一个运行在后台的 AI 记忆引擎。它观察你的工作、
 ### 1. 克隆并安装
 
 ```bash
+# Option A: pip install
 git clone https://github.com/WindRiders/opendeepspace.git
 cd opendeepspace
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+
+# Option B: Docker (one command)
+docker run -d --name deepspace \
+  -e DASHSCOPE_API_KEY="sk-xxx" \
+  -p 8645:8645 \
+  windriders/opendeepspace
 ```
 
 ### 2. 配置 API Key

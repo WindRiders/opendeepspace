@@ -48,7 +48,7 @@ export DASHSCOPE_API_KEY="sk-your-api-key"
 ### 5. 初始化
 
 ```bash
-deepspace setup
+deepspace init
 ```
 
 这会创建数据库表、索引和约束。

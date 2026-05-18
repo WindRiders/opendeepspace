@@ -115,7 +115,7 @@ cd opendeepspace
 docker compose up -d
 pip install -e ".[dev]"
 export DASHSCOPE_API_KEY="sk-..."
-deepspace setup
+deepspace init
 deepspace serve
 ```
 
