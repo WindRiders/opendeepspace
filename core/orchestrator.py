@@ -620,14 +620,24 @@ class Orchestrator:
         consolidate_interval: int = 60,
         learn_interval: int = 15,
         proactive_interval: int = 10,
+        auto_solve_interval: int = 120,
     ):
         """Run the orchestrator continuously with staggered intervals."""
         self._running = True
         last_consolidation = 0.0
         last_learn = 0.0
         last_proactive = 0.0
+        last_auto_solve = 0.0
 
-        logger.info("Orchestrator started (Executive + Action + Verification Agents online)")
+        # Start model router health checks
+        if hasattr(self.llm, 'router'):
+            await self.llm.router.start_health_checks()
+            logger.info("ModelRouter health checks started")
+
+        # Load plugins
+        self._load_plugins()
+
+        logger.info("Orchestrator started (9 agents + auto-solve + router + plugins online)")
 
         while self._running:
             now = asyncio.get_event_loop().time()
@@ -653,6 +663,14 @@ class Orchestrator:
                     last_proactive = now
                 except Exception as e:
                     logger.error(f"Proactive cycle failed: {e}")
+
+            if now - last_auto_solve >= auto_solve_interval * 60:
+                try:
+                    await self.solve_self_derived_goals(max_goals=1)
+                    last_auto_solve = now
+                    logger.debug("Auto-solve cycle complete")
+                except Exception as e:
+                    logger.error(f"Auto-solve failed: {e}")
 
             await asyncio.sleep(60)
 
