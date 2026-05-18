@@ -34,7 +34,7 @@ class TestOrchestratorInit:
             mock_llm = MagicMock()
             mock_config = {}
 
-            orch = Orchestrator(mock_engine, mock_llm, mock_config)
+            orch = Orchestrator(mock_engine, mock_llm, mock_config, plugin_handlers={})
             assert orch.engine == mock_engine
             assert orch.llm == mock_llm
             assert orch.config == mock_config

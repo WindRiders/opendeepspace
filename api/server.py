@@ -84,6 +84,26 @@ class AppState:
 state = AppState()
 
 
+# Global plugin manager (shared across all Orchestrator instances)
+_plugin_manager = None
+
+
+def _get_plugin_handlers() -> dict:
+    """Get plugin execution handlers from global plugin manager."""
+    global _plugin_manager
+    if _plugin_manager is None:
+        from core.plugin_manager import PluginManager
+        _plugin_manager = PluginManager()
+        try:
+            import asyncio
+            asyncio.get_event_loop()
+        except RuntimeError:
+            pass  # No event loop yet
+    if _plugin_manager.plugins:
+        return _plugin_manager.get_all_execution_handlers()
+    return {}
+
+
 async def init_app(config: dict):
     """Initialize all components."""
     state.llm = LLMClient(config)
@@ -132,13 +152,14 @@ async def lifespan(app: FastAPI):
     await init_app(config)
     # Auto-load plugins on startup
     try:
+        global _plugin_manager
         from core.plugin_manager import PluginManager
-        pm = PluginManager()
-        await pm.discover()
-        await pm.load_all()
-        await pm.enable_all()
-        if pm.plugins:
-            logger.info(f"Plugins auto-loaded: {len(pm.plugins)} enabled")
+        _plugin_manager = PluginManager()
+        await _plugin_manager.discover()
+        await _plugin_manager.load_all()
+        await _plugin_manager.enable_all()
+        if _plugin_manager.plugins:
+            logger.info(f"Plugins auto-loaded: {len(_plugin_manager.plugins)} enabled")
     except Exception as e:
         logger.debug(f"Plugin auto-load skipped: {e}")
     logger.info("DeepSpace API server started")
@@ -441,7 +462,7 @@ async def api_solve(request: SolveRequest, _auth=Depends(verify_auth)):
     """Execute autonomous problem-solving: Goal → Plan → Execute → Verify → Learn."""
     config = load_config()
     engine = await get_engine(config)
-    orch = Orchestrator(engine, engine.llm, config)
+    orch = Orchestrator(engine, engine.llm, config, plugin_handlers=_get_plugin_handlers())
 
     mode = ExecutionMode(request.mode) if request.mode else ExecutionMode.SEMI_AUTO
 
@@ -465,7 +486,7 @@ async def api_executions(limit: int = 20):
     """Get execution history."""
     config = load_config()
     engine = await get_engine(config)
-    orch = Orchestrator(engine, engine.llm, config)
+    orch = Orchestrator(engine, engine.llm, config, plugin_handlers=_get_plugin_handlers())
     return {"executions": orch.execution_history[-limit:]}
 
 
@@ -474,7 +495,7 @@ async def api_auto_solve():
     """Derive and solve self-derived goals from knowledge gaps."""
     config = load_config()
     engine = await get_engine(config)
-    orch = Orchestrator(engine, engine.llm, config)
+    orch = Orchestrator(engine, engine.llm, config, plugin_handlers=_get_plugin_handlers())
     results = await orch.solve_self_derived_goals(max_goals=2)
     return {"results": results}
 
@@ -484,7 +505,7 @@ async def api_goals():
     """Get self-derived goals from reflection gaps."""
     config = load_config()
     engine = await get_engine(config)
-    orch = Orchestrator(engine, engine.llm, config)
+    orch = Orchestrator(engine, engine.llm, config, plugin_handlers=_get_plugin_handlers())
     goals = await orch.derive_goals(max_goals=5)
     return {"goals": goals}
 
@@ -583,7 +604,7 @@ async def api_timeline(days: int = 30, project: str = ""):
     engine = await get_engine(config)
     from core.timeline import TimelineGenerator
     from core.orchestrator import Orchestrator
-    orch = Orchestrator(engine, engine.llm, config)
+    orch = Orchestrator(engine, engine.llm, config, plugin_handlers=_get_plugin_handlers())
     gen = TimelineGenerator(engine, orchestrator=orch)
     if project:
         return await gen.get_project_timeline(project=project, days=days)

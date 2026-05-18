@@ -98,6 +98,19 @@ class PgVectorStore(RelationalStore, VectorStore):
                 );
             """)
 
+            # Execution history
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS execution_history (
+                    id SERIAL PRIMARY KEY,
+                    goal TEXT NOT NULL,
+                    outcome TEXT NOT NULL DEFAULT 'pending',
+                    steps_total INTEGER DEFAULT 0,
+                    steps_passed INTEGER DEFAULT 0,
+                    details JSONB DEFAULT '{}',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+
             # Indexes
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_memories_layer ON memories(layer);
@@ -453,6 +466,44 @@ class PgVectorStore(RelationalStore, VectorStore):
 
     async def get_by_id(self, memory_id: str) -> Optional[Memory]:
         return await self.get_memory(memory_id)
+
+    # ── Execution History ──────────────────────
+
+    def save_execution(self, goal: str, outcome: str, steps_total: int, steps_passed: int, details: dict = None) -> int:
+        """Save an execution record. Returns row id."""
+        import json as _json
+        details_json = _json.dumps(details or {}, default=str)
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """INSERT INTO execution_history (goal, outcome, steps_total, steps_passed, details)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                (goal, outcome, steps_total, steps_passed, details_json),
+            )
+            row = cur.fetchone()
+            return row["id"] if row else -1
+
+    def get_executions(self, limit: int = 50) -> list[dict]:
+        """Get recent execution history."""
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM execution_history ORDER BY created_at DESC LIMIT %s",
+                (limit,),
+            )
+            rows = cur.fetchall()
+            import json as _json
+            results = []
+            for r in rows:
+                d = dict(r)
+                if d.get("created_at"):
+                    d["timestamp"] = d["created_at"].isoformat()
+                # Parse details JSON
+                if isinstance(d.get("details"), str):
+                    try:
+                        d["details"] = _json.loads(d["details"])
+                    except Exception:
+                        pass
+                results.append(d)
+            return results
 
 
 async def create_store(config: dict) -> PgVectorStore:

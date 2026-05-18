@@ -48,6 +48,7 @@ class Orchestrator:
         engine: MemoryEngine,
         llm: LLMClient,
         config: dict,
+        plugin_handlers: Optional[dict] = None,
     ):
         self.engine = engine
         self.llm = llm
@@ -55,13 +56,14 @@ class Orchestrator:
         self.learner = AutonomousLearner(engine, llm, config)
         self.proactive = ProactiveService(engine, llm, config)
 
-        # Execution engine
+        # Execution engine — inject plugin handlers if provided
         exec_cfg = config.get("execution", {})
         self.executor = AgentExecutor(
             workdir=exec_cfg.get("workdir", "."),
             mode=exec_cfg.get("mode", "semi_auto"),
             default_timeout=exec_cfg.get("default_timeout", 120),
             allow_dangerous=exec_cfg.get("allow_dangerous", False),
+            plugin_handlers=plugin_handlers or {},
         )
 
         self._running = False
@@ -506,14 +508,27 @@ class Orchestrator:
         goal.status = StepStatus.COMPLETED if results["outcome"] == "success" else StepStatus.FAILED
         goal.completed_at = now_utc()
 
-        # Record in history
-        self._execution_history.append({
+        # Record in history (memory + DB)
+        record = {
             "goal": results["goal"],
             "outcome": results["outcome"],
             "steps_total": len(results.get("execution", [])),
             "steps_passed": success_count,
             "timestamp": now_utc().isoformat(),
-        })
+        }
+        self._execution_history.append(record)
+
+        # Persist to DB
+        try:
+            self.engine.vector_store.save_execution(
+                goal=results["goal"],
+                outcome=results["outcome"],
+                steps_total=record["steps_total"],
+                steps_passed=record["steps_passed"],
+                details={"mode": results.get("mode", ""), "verification": results.get("verification", [])},
+            )
+        except Exception as e:
+            logger.warning(f"Failed to persist execution: {e}")
         # Keep last 100
         if len(self._execution_history) > 100:
             self._execution_history = self._execution_history[-100:]
@@ -867,4 +882,20 @@ class Orchestrator:
 
     @property
     def execution_history(self) -> list[dict]:
+        """Get execution history, merging DB + memory."""
+        db_history = []
+        try:
+            db_history = self.engine.vector_store.get_executions(limit=50)
+        except Exception:
+            pass
+        # Merge: DB has persistent records, memory has recent ones
+        # Prefer DB records since they survive restarts
+        if db_history:
+            return [{
+                "goal": h.get("goal", ""),
+                "outcome": h.get("outcome", "unknown"),
+                "steps_total": h.get("steps_total", 0),
+                "steps_passed": h.get("steps_passed", 0),
+                "timestamp": h.get("timestamp", ""),
+            } for h in db_history]
         return list(self._execution_history)
