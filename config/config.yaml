@@ -92,3 +92,28 @@ api:
 logging:
   level: "INFO"
   file: "./data/deepspace.log"
+
+# ──────────────────────────────────────────────
+# Autonomous Execution (NEW)
+# ──────────────────────────────────────────────
+
+execution:
+  # Execution mode: plan_only | step_by_step | semi_auto | full_auto
+  mode: "semi_auto"
+
+  # Working directory for command execution
+  workdir: "."
+
+  # Default timeout per step (seconds)
+  default_timeout: 120
+
+  # Allow dangerous commands? DANGEROUS — only for sandboxed environments
+  allow_dangerous: false
+
+  # Additional safe command patterns (regex)
+  extra_safe_patterns: []
+  # Additional dangerous patterns to block (regex)
+  extra_dangerous_patterns: []
+
+  # Notify user before executing modify-type commands
+  confirm_modify: true

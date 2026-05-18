@@ -646,6 +646,106 @@ def orchestrate(ctx, once, consolidate_interval, learn_interval, proactive_inter
 
 
 @cli.command()
+@click.argument("goal")
+@click.option("--context", "-c", default="", help="Additional context or constraints")
+@click.option("--mode", "-m", type=click.Choice(["plan_only", "step_by_step", "semi_auto", "full_auto"]),
+              default="semi_auto", help="Execution mode")
+@click.pass_context
+def solve(ctx, goal, context, mode):
+    """Autonomous problem-solving: Goal -> Plan -> Execute -> Verify -> Learn.
+
+    GOAL is a description of what you want to achieve in natural language.\n
+    Examples:
+      deepspace solve "find all Python files modified in the last 7 days"
+      deepspace solve "check if deepspace-pg container is running" -m plan_only
+      deepspace solve "run pytest and show failing tests" -c "workdir: ~/deepspace"
+    """
+    from core.orchestrator import Orchestrator
+    from core.models import ExecutionMode
+
+    async def _run():
+        config = load_config(ctx.obj["config_path"])
+        engine = await init_engine(config)
+        orch = Orchestrator(engine, engine.llm, config)
+
+        exec_mode = ExecutionMode(mode)
+
+        console.print(f"\n[bold cyan]Goal:[/] {goal}")
+        console.print(f"[dim]Mode: {mode} | Context: {context or 'none'}[/]\n")
+
+        # Phase 1 & 2: Goal + Plan
+        with console.status("[bold blue]Planning...[/]"):
+            plan_result = await orch._agent_planning(goal_description=goal)
+
+        plan = plan_result.get("plan", {})
+        steps = plan.get("steps", [])
+
+        if steps:
+            table = Table(title="Execution Plan")
+            table.add_column("#", style="dim", width=3)
+            table.add_column("Action", width=12)
+            table.add_column("Description", width=50)
+            table.add_column("Command", width=40)
+
+            for i, s in enumerate(steps):
+                table.add_row(
+                    str(i), s.get("action_type", "shell"),
+                    s.get("description", "")[:50],
+                    s.get("command", "")[:40],
+                )
+            console.print(table)
+            console.print(f"[dim]Rationale: {plan.get('rationale', 'none')}[/]")
+            console.print(f"[dim]Estimated: {plan.get('estimated_total_minutes', 0)} min[/]\n")
+
+        if mode == "plan_only":
+            return
+
+        # Phase 3-5: Execute + Verify + Learn
+        with console.status("[bold green]Executing...[/]"):
+            result = await orch.solve_goal(
+                description=goal,
+                context=context,
+                mode=exec_mode,
+            )
+
+        # Display results
+        outcome_style = {
+            "success": "green", "partial_success": "yellow",
+            "failed": "red", "planned_only": "blue",
+        }
+        style = outcome_style.get(result.get("outcome", "failed"), "red")
+        console.print(f"\n[bold {style}]Outcome: {result['outcome']}[/]")
+
+        if result.get("execution"):
+            table = Table(title="Execution Results")
+            table.add_column("#", style="dim", width=3)
+            table.add_column("Description", width=40)
+            table.add_column("Status", width=14)
+            table.add_column("Duration", width=10)
+
+            for i, exec_entry in enumerate(result["execution"]):
+                verify_entry = result.get("verification", [{}])[i] if i < len(result.get("verification", [])) else {}
+                passed_mark = " OK" if verify_entry.get("passed") else " !!"
+
+                s_style = {
+                    "completed": "green", "failed": "red",
+                    "skipped": "dim", "approval_required": "yellow",
+                }.get(exec_entry.get("status", "failed"), "red")
+
+                table.add_row(
+                    str(exec_entry["step"]),
+                    exec_entry.get("description", "")[:40],
+                    f"[{s_style}]{exec_entry.get('status', '?')}{passed_mark}[/]",
+                    f"{exec_entry.get('duration_seconds', 0):.1f}s",
+                )
+            console.print(table)
+
+        console.print(f"\n[dim]Outcome recorded in memory for future planning.[/]")
+
+    asyncio.run(_run())
+
+
+@cli.command()
 @click.option("--port", "-p", default=8645, help="API server port")
 @click.option("--host", "-h", default="127.0.0.1", help="API server host")
 @click.pass_context

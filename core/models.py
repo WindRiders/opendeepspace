@@ -205,3 +205,103 @@ class ProjectContext(BaseModel):
     open_issues: list[str] = Field(default_factory=list)
     recent_decisions: list[str] = Field(default_factory=list)
     last_active: datetime = Field(default_factory=now_utc)
+
+
+# ──────────────────────────────────────────────
+# Autonomous Execution Models
+# ──────────────────────────────────────────────
+
+
+class StepStatus(str, Enum):
+    """Status of an action step in an execution plan."""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    APPROVAL_REQUIRED = "approval_required"
+
+
+class ExecutionMode(str, Enum):
+    """How the execution engine should behave."""
+    PLAN_ONLY = "plan_only"           # Only generate plan, don't execute
+    STEP_BY_STEP = "step_by_step"     # Execute one step at a time, ask before each
+    SEMI_AUTO = "semi_auto"           # Execute freely but ask for dangerous ops
+    FULL_AUTO = "full_auto"           # Execute everything without asking
+
+
+class Goal(BaseModel):
+    """A user goal or system-derived objective."""
+    id: str = Field(default_factory=new_id)
+    description: str                  # What the user wants to achieve
+    context: str = ""                 # Additional context/constraints
+    mode: ExecutionMode = ExecutionMode.SEMI_AUTO
+    created_at: datetime = Field(default_factory=now_utc)
+    completed_at: Optional[datetime] = None
+    status: StepStatus = StepStatus.PENDING
+
+
+class ActionStep(BaseModel):
+    """A single actionable step in an execution plan."""
+    id: str = Field(default_factory=new_id)
+    step_number: int
+    description: str                  # Human-readable description
+    action_type: str = "shell"        # shell | python | api_call | file_write | git
+    command: str = ""                 # The actual command/code to execute
+    expected_outcome: str = ""        # What should happen if successful
+    timeout_seconds: int = 120
+    retry_count: int = 0
+    max_retries: int = 2
+    status: StepStatus = StepStatus.PENDING
+    dependencies: list[int] = Field(default_factory=list)  # Step numbers that must complete first
+    created_at: datetime = Field(default_factory=now_utc)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class ActionResult(BaseModel):
+    """Result of executing an action step."""
+    step_id: str
+    step_number: int
+    status: StepStatus
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = -1
+    output_summary: str = ""           # LLM-generated summary of output
+    error_analysis: str = ""           # LLM analysis of what went wrong (if failed)
+    duration_seconds: float = 0.0
+    retry_attempt: int = 0
+    timestamp: datetime = Field(default_factory=now_utc)
+
+
+class VerificationResult(BaseModel):
+    """Result of verifying an action's outcome."""
+    step_id: str
+    step_number: int
+    passed: bool
+    evidence: str = ""                 # What shows success/failure
+    confidence: float = 0.0
+    suggestion: str = ""               # What to do if verification failed
+    timestamp: datetime = Field(default_factory=now_utc)
+
+
+class ExecutionPlan(BaseModel):
+    """A complete execution plan for a goal."""
+    id: str = Field(default_factory=new_id)
+    goal: Goal
+    steps: list[ActionStep] = Field(default_factory=list)
+    rationale: str = ""                # Why this plan was chosen
+    estimated_total_minutes: int = 0
+    created_at: datetime = Field(default_factory=now_utc)
+
+    @property
+    def completed_steps(self) -> int:
+        return sum(1 for s in self.steps if s.status == StepStatus.COMPLETED)
+
+    @property
+    def failed_steps(self) -> int:
+        return sum(1 for s in self.steps if s.status == StepStatus.FAILED)
+
+    @property
+    def is_complete(self) -> bool:
+        return all(s.status in (StepStatus.COMPLETED, StepStatus.SKIPPED) for s in self.steps)

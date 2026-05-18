@@ -13,13 +13,14 @@ class TestAgentRole:
     def test_all_roles(self):
         expected = {
             "executive", "research", "memory", "graph",
-            "planning", "reflection", "proactive",
+            "planning", "action", "verification",
+            "reflection", "proactive",
         }
         actual = {r.value for r in AgentRole}
         assert actual == expected
 
     def test_seven_agents(self):
-        assert len(AgentRole) == 7
+        assert len(AgentRole) == 9
 
 
 class TestOrchestratorInit:
