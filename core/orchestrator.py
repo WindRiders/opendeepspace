@@ -635,7 +635,7 @@ class Orchestrator:
             logger.info("ModelRouter health checks started")
 
         # Load plugins
-        self._load_plugins()
+        await self._load_plugins()
 
         logger.info("Orchestrator started (9 agents + auto-solve + router + plugins online)")
 
@@ -682,16 +682,15 @@ class Orchestrator:
             self.llm.router.stop_health_checks()
         logger.info("Orchestrator stopped")
 
-    def _load_plugins(self):
+    async def _load_plugins(self):
         """Auto-load plugins on startup."""
         try:
             from core.plugin_manager import PluginManager
-            import asyncio as _asyncio
             manager = PluginManager()
-            manifests = _asyncio.run(manager.discover())
+            manifests = await manager.discover()
             if manifests:
-                _asyncio.run(manager.load_all())
-                _asyncio.run(manager.enable_all())
+                await manager.load_all()
+                await manager.enable_all()
                 # Register plugin handlers with executor
                 handlers = manager.get_all_execution_handlers()
                 if handlers:

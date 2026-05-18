@@ -135,9 +135,9 @@ async def lifespan(app: FastAPI):
         from core.plugin_manager import PluginManager
         pm = PluginManager()
         await pm.discover()
-        if pm.plugins or True:
-            await pm.load_all()
-            await pm.enable_all()
+        await pm.load_all()
+        await pm.enable_all()
+        if pm.plugins:
             logger.info(f"Plugins auto-loaded: {len(pm.plugins)} enabled")
     except Exception as e:
         logger.debug(f"Plugin auto-load skipped: {e}")
@@ -437,7 +437,7 @@ async def verify_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depe
 # ── Autonomous Execution Endpoints (NEW) ──
 
 @app.post("/solve")
-async def api_solve(request: SolveRequest):
+async def api_solve(request: SolveRequest, _auth=Depends(verify_auth)):
     """Execute autonomous problem-solving: Goal → Plan → Execute → Verify → Learn."""
     config = load_config()
     engine = await get_engine(config)

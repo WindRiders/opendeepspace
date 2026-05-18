@@ -1294,9 +1294,11 @@ def timeline(ctx, days, project):
     """View a chronological timeline of memories and executions."""
     async def _run():
         from core.timeline import TimelineGenerator
+        from core.orchestrator import Orchestrator
         config = load_config(ctx.obj["config_path"])
         engine = await init_engine(config)
-        gen = TimelineGenerator(engine)
+        orch = Orchestrator(engine, engine.llm, config)
+        gen = TimelineGenerator(engine, orchestrator=orch)
         json_out = ctx.obj.get("json_output")
 
         result = await gen.get_project_timeline(project, days) if project else await gen.get_full_timeline(days)
@@ -1343,12 +1345,18 @@ def plugins(ctx, action, plugin_name):
             _asyncio.run(manager.load_all()); _asyncio.run(manager.enable_all())
         console.print(f"[green]Loaded {len(manager.plugins)} plugin(s)[/]")
     elif action == "enable":
+        if not plugin_name:
+            console.print("[red]Error: plugin name required (e.g. deepspace plugins enable echo_tool)[/]")
+            return
         _asyncio.run(manager.load_all())
-        ok = _asyncio.run(manager.enable_plugin(plugin_name)) if plugin_name else True
-        console.print(f"[{'green]Enabled' if ok else 'red]Not found'}[/]")
+        ok = _asyncio.run(manager.enable_plugin(plugin_name))
+        console.print(f"[{'green]Enabled' if ok else 'red]Not found'}: {plugin_name}[/]")
     elif action == "disable":
-        ok = _asyncio.run(manager.disable_plugin(plugin_name)) if plugin_name else True
-        console.print(f"[green]Disabled[/]")
+        if not plugin_name:
+            console.print("[red]Error: plugin name required (e.g. deepspace plugins disable echo_tool)[/]")
+            return
+        ok = _asyncio.run(manager.disable_plugin(plugin_name))
+        console.print(f"[{'green]Disabled' if ok else 'red]Not found'}: {plugin_name}[/]")
 
 
 @cli.command()
