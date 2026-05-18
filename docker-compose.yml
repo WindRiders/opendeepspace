@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  deepspace-pg:
+    image: pgvector/pgvector:pg16
+    container_name: deepspace-pg
+    environment:
+      POSTGRES_USER: deepspace
+      POSTGRES_PASSWORD: deepspace
+      POSTGRES_DB: deepspace
+    ports:
+      - "5440:5432"
+    volumes:
+      - deepspace_pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deepspace"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  deepspace-neo4j:
+    image: neo4j:5-community
+    container_name: deepspace-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/deepspace123
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7474:7474"   # HTTP
+      - "7687:7687"   # Bolt
+    volumes:
+      - deepspace_neo4j_data:/data
+      - deepspace_neo4j_logs:/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "deepspace123", "RETURN 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+volumes:
+  deepspace_pg_data:
+  deepspace_neo4j_data:
+  deepspace_neo4j_logs:

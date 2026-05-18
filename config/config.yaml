@@ -1,0 +1,94 @@
+# DeepSpace Configuration
+
+# LLM Backend (DashScope compatible)
+llm:
+  provider: "dashscope"
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  api_key: "${DASHSCOPE_API_KEY}"
+  models:
+    primary: "deepseek-v4-pro"        # Reasoning, code, complex extraction
+    vision: "qwen-vl-max-latest"      # Vision tasks
+    embedding: "text-embedding-v3"    # Vector embeddings
+    light: "qwen-turbo-latest"        # Lightweight tasks (classification, summarization)
+
+# Storage
+storage:
+  postgres:
+    host: "localhost"
+    port: 5440
+    database: "deepspace"
+    user: "deepspace"
+    password: "deepspace"
+  neo4j:
+    uri: "bolt://localhost:7687"
+    user: "neo4j"
+    password: "deepspace123"
+    database: "neo4j"
+  chroma:
+    path: "./data/chroma"
+
+# Memory Engine
+memory:
+  # How many days before short-term memory is considered for consolidation
+  consolidation_threshold_days: 1
+  # Maximum short-term memories before forced consolidation
+  max_short_term: 1000
+  # How often to run consolidation (in minutes)
+  consolidation_interval: 60
+  # Importance threshold for auto-saving to long-term (0.0-1.0)
+  importance_threshold: 0.6
+  # Default TTL for long-term memories (0 = never expire)
+  default_ttl_days: 0
+
+# Knowledge Graph
+graph:
+  # Minimum confidence for auto-accepting inferred relations (0.0-1.0)
+  auto_accept_confidence: 0.8
+  # How often to run graph maintenance (in hours)
+  maintenance_interval: 24
+  # Maximum entities before triggering manual review threshold
+  entity_warning_threshold: 50000
+
+# Autonomous Learner
+learner:
+  # Minimum CPU idle % to start learning
+  idle_cpu_threshold: 70
+  # Check interval (in minutes)
+  check_interval: 15
+  # Max concurrent learning tasks
+  max_concurrent_tasks: 2
+  # Max daily LLM cost budget (USD)
+  daily_cost_budget: 1.0
+  # Priority weights
+  priority_weights:
+    user_relevance: 0.4
+    knowledge_gap: 0.3
+    freshness: 0.15
+    curiosity: 0.15
+
+# Proactive Service
+proactive:
+  # Minimum confidence to auto-push (0.0-1.0)
+  push_confidence: 0.7
+  # Cooldown between pushes (in minutes)
+  push_cooldown: 30
+  # Max pushes per day
+  max_daily_pushes: 5
+
+# Hermes Integration
+hermes:
+  enabled: true
+  config_path: "~/.hermes/config.yaml"
+  # Cron job prefix for DeepSpace jobs
+  cron_prefix: "ds-"
+
+# API
+api:
+  host: "127.0.0.1"
+  port: 8645
+  cors_origins: ["*"]
+
+# Logging
+logging:
+  level: "INFO"
+  file: "./data/deepspace.log"
