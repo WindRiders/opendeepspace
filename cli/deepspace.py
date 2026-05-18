@@ -27,7 +27,7 @@ from core.models import MemoryLayer, MemoryType
 from storage.pgvector_store import PgVectorStore, create_store
 from storage.neo4j_store import Neo4jGraphStore, create_graph_store
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 
 console = Console()
 logger = logging.getLogger("deepspace")

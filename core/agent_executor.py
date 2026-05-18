@@ -170,12 +170,14 @@ class AgentExecutor:
         mode: str = "semi_auto",    # plan_only | step_by_step | semi_auto | full_auto
         default_timeout: int = 120,
         allow_dangerous: bool = False,
+        plugin_handlers: Optional[dict] = None,
     ):
         self.workdir = Path(workdir).resolve()
         self.mode = mode
         self.default_timeout = default_timeout
         self.allow_dangerous = allow_dangerous
         self._execution_history: list[ActionResult] = []
+        self._plugin_handlers = plugin_handlers or {}
 
     # ── Main Execution ──────────────────────────
 
@@ -219,6 +221,22 @@ class AgentExecutor:
         self, step: ActionStep, start_time: float
     ) -> ActionResult:
         """Dispatch execution based on action_type."""
+
+        # Check plugin handlers first
+        if step.action_type in self._plugin_handlers:
+            try:
+                handler = self._plugin_handlers[step.action_type]
+                result = await handler(step, self)
+                if result:
+                    return result
+            except Exception as e:
+                duration = asyncio.get_event_loop().time() - start_time
+                return ActionResult(
+                    step_id=step.id, step_number=step.step_number,
+                    status=StepStatus.FAILED,
+                    stderr=f"Plugin handler error: {e}",
+                    exit_code=-1, duration_seconds=round(duration, 2),
+                )
 
         if step.action_type == "shell":
             return await self._run_shell(step, start_time)

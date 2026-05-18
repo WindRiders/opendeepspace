@@ -59,8 +59,10 @@
 <div class="tabs">
 <button class="tab active" onclick="switchTab('overview')">Overview</button>
 <button class="tab" onclick="switchTab('memories')">Memories</button>
-<button class="tab" onclick="switchTab('graph')">Knowledge Graph</button>
+<button class="tab" onclick="switchTab('graph')">Graph</button>
 <button class="tab" onclick="switchTab('executions')">Executions</button>
+<button class="tab" onclick="switchTab('timeline')">Timeline</button>
+<button class="tab" onclick="switchTab('analytics')">Analytics</button>
 </div>
 <div id="tab-content"></div>
 </div>
@@ -115,7 +117,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   event.target.classList.add('active');
   document.getElementById('tab-content').innerHTML = '<div class="loading">Loading...</div>';
-  const loaders = { overview: loadOverview, memories: loadMemories, graph: loadGraph, executions: loadExecutions };
+  const loaders = { overview: loadOverview, memories: loadMemories, graph: loadGraph, executions: loadExecutions, timeline: loadTimeline, analytics: loadAnalytics };
   (loaders[tab] || loadOverview)();
 }
 
@@ -297,6 +299,92 @@ async function loadExecutions() {
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function refreshAll(){loadHealth();loadOverview()}
+
+async function loadTimeline() {
+  try {
+    const r = await fetchJSON('/timeline?days=60');
+    const timeline = r.timeline || [];
+    let html = '<div class="card"><h3>60-Day Timeline</h3>';
+    html += `<div style="color:var(--dim);margin-bottom:12px">${r.days} days, ${r.total_events} events</div>`;
+
+    for (const day of timeline.slice(0,30)) {
+      const date = day.date || '';
+      const mems = day.memories || 0;
+      const execs = day.executions || 0;
+      const barM = '█'.repeat(Math.min(mems, 30));
+      const barE = '▒'.repeat(Math.min(execs, 15));
+      html += `<div style="margin-bottom:4px;display:flex;align-items:center;gap:8px">
+        <span style="color:var(--dim);font-size:11px;min-width:90px">${date}</span>
+        <span style="color:var(--accent);font-size:10px">${barM}</span>
+        <span style="color:var(--yellow);font-size:10px">${barE}</span>
+        <span style="color:var(--dim);font-size:10px">${mems}m ${execs}e</span>
+      </div>`;
+    }
+    html += '</div>';
+    document.getElementById('tab-content').innerHTML = html;
+  } catch(e) { document.getElementById('tab-content').innerHTML = '<div class="error">'+esc(e.message)+'</div>'; }
+}
+
+async function loadAnalytics() {
+  try {
+    const a = await fetchJSON('/analytics?days=60');
+    let html = '<div class="grid">';
+    html += '<div class="stat"><div class="label">Total</div><div class="value blue">'+a.total_memories+'</div></div>';
+    html += '<div class="stat"><div class="label">Avg Importance</div><div class="value">'+a.avg_importance+'</div></div>';
+    html += '<div class="stat"><div class="label">Projects</div><div class="value purple">'+(a.top_projects? Object.keys(Object.fromEntries(a.top_projects||[])).length : 0)+'</div></div>';
+    html += '</div>';
+
+    if (a.top_projects && a.top_projects.length) {
+      html += '<div class="card"><h3>Active Projects</h3>';
+      const maxCount = a.top_projects[0][1];
+      for (const [proj, count] of a.top_projects.slice(0,8)) {
+        const w = Math.round((count/maxCount)*100);
+        html += `<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:12px"><span>${esc(proj||'general')}</span><span style="color:var(--dim)">${count}</span></div>
+          <div class="progress-bar"><div class="fill" style="width:${w}%;background:var(--accent)"></div></div></div>`;
+      }
+      html += '</div>';
+    }
+
+    if (a.top_types && a.top_types.length) {
+      html += '<div class="card"><h3>Memory Types</h3>';
+      const maxType = a.top_types[0][1];
+      for (const [type, count] of a.top_types.slice(0,6)) {
+        const w = Math.round((count/maxType)*100);
+        html += `<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:12px"><span>${esc(type)}</span><span style="color:var(--dim)">${count}</span></div>
+          <div class="progress-bar"><div class="fill" style="width:${w}%;background:var(--green)"></div></div></div>`;
+      }
+      html += '</div>';
+    }
+
+    if (a.importance_distribution) {
+      html += '<div class="card"><h3>Importance Distribution</h3>';
+      const maxImp = Math.max(...Object.values(a.importance_distribution));
+      for (const [label, count] of Object.entries(a.importance_distribution)) {
+        const w = Math.round((count/maxImp)*100);
+        const color = label.includes('low') ? 'var(--dim)' : label.includes('medium') ? 'var(--yellow)' : 'var(--green)';
+        html += `<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:12px"><span>${esc(label)}</span><span style="color:var(--dim)">${count}</span></div>
+          <div class="progress-bar"><div class="fill" style="width:${w}%;background:${color}"></div></div></div>`;
+      }
+      html += '</div>';
+    }
+
+    if (a.growth_by_day && a.growth_by_day.length) {
+      html += '<div class="card"><h3>Growth Curve</h3>';
+      const maxDay = Math.max(...a.growth_by_day.map(([_,c])=>c));
+      for (const [day, count] of a.growth_by_day.slice(-30)) {
+        const w = Math.round((count/maxDay)*100);
+        html += `<div style="margin-bottom:2px;display:flex;align-items:center;gap:8px">
+          <span style="color:var(--dim);font-size:10px;min-width:80px">${day}</span>
+          <div style="flex:1;height:10px;background:var(--border);border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${w}%;background:var(--accent);border-radius:2px"></div></div>
+          <span style="color:var(--dim);font-size:10px">${count}</span></div>`;
+      }
+      html += '</div>';
+    }
+
+    document.getElementById('tab-content').innerHTML = html;
+  } catch(e) { document.getElementById('tab-content').innerHTML = '<div class="error">'+esc(e.message)+'</div>'; }
+}
 
 if (Notification && Notification.permission === 'default') Notification.requestPermission();
 connectWS();

@@ -6,12 +6,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from core.llm_client import LLMClient
@@ -402,6 +404,23 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
 
 
+# ── Auth (NEW) ────────────────────────────────
+
+# Optional API auth — set DEEP_SPACE_API_TOKEN to enable
+API_TOKEN = os.environ.get("DEEP_SPACE_API_TOKEN", "")
+_auth_enabled = bool(API_TOKEN)
+security = HTTPBearer(auto_error=False)
+
+
+async def verify_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Verify API token if auth is enabled."""
+    if not _auth_enabled:
+        return True
+    if credentials and credentials.credentials == API_TOKEN:
+        return True
+    raise HTTPException(status_code=401, detail="Invalid or missing API token")
+
+
 # ── Health ───────────────────────────────────
 
 # ── Autonomous Execution Endpoints (NEW) ──
@@ -502,7 +521,48 @@ async def api_dedup(threshold: float = 0.85, dry_run: bool = False):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.6.0", "agents": 9, "features": ["memory", "graph", "learn", "execute", "recover", "dashboard", "export", "dedup", "notify", "timeline", "plugins"]}
+    return {"status": "ok", "version": "0.7.0", "agents": 9, "features": ["memory", "graph", "learn", "execute", "recover", "dashboard", "export", "dedup", "notify", "timeline", "plugins", "auth", "analytics"]}
+
+
+@app.get("/analytics")
+async def api_analytics(days: int = 30):
+    """Get memory analytics: trends, active projects, growth."""
+    config = load_config()
+    engine = await get_engine(config)
+
+    stats = await engine.stats()
+    all_memories = []
+    for layer in MemoryLayer:
+        mems = await engine.vector_store.get_by_layer(layer, limit=500)
+        all_memories.extend(mems)
+
+    # Projects
+    from collections import Counter
+    project_counts = Counter(m.project for m in all_memories if m.project)
+    type_counts = Counter(m.memory_type.value for m in all_memories)
+
+    # Growth by day
+    by_day = Counter()
+    for m in all_memories:
+        day = m.created_at.isoformat()[:10] if hasattr(m.created_at, 'isoformat') else str(m.created_at)[:10]
+        by_day[day] += 1
+
+    # Importance distribution
+    importance_buckets = {"low (0-0.3)": 0, "medium (0.3-0.7)": 0, "high (0.7-1.0)": 0}
+    for m in all_memories:
+        if m.importance < 0.3: importance_buckets["low (0-0.3)"] += 1
+        elif m.importance < 0.7: importance_buckets["medium (0.3-0.7)"] += 1
+        else: importance_buckets["high (0.7-1.0)"] += 1
+
+    return {
+        "total_memories": stats["total_memories"],
+        "by_layer": stats["by_layer"],
+        "top_projects": project_counts.most_common(10),
+        "top_types": type_counts.most_common(10),
+        "growth_by_day": sorted(by_day.items())[-days:],
+        "importance_distribution": importance_buckets,
+        "avg_importance": round(sum(m.importance for m in all_memories) / max(len(all_memories), 1), 3),
+    }
 
 
 @app.get("/timeline")

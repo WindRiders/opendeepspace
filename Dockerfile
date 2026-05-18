@@ -62,5 +62,5 @@ CMD ["python", "-m", "uvicorn", "api.server:app", "--host", "0.0.0.0", "--port",
 LABEL org.opencontainers.image.title="opendeepspace"
 LABEL org.opencontainers.image.description="DeepSpace — Autonomous Learning Memory System"
 LABEL org.opencontainers.image.source="https://github.com/WindRiders/opendeepspace"
-LABEL org.opencontainers.image.version="0.6.0"
+LABEL org.opencontainers.image.version="0.7.0"
 LABEL org.opencontainers.image.licenses="MIT"
