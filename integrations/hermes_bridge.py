@@ -181,6 +181,19 @@ class HermesBridge:
 
     # ── Setup All Schedules ────────────────────
 
+    def schedule_auto_solve(self, interval_hours: int = 4) -> Optional[str]:
+        """Schedule autonomous problem-solving from self-derived goals."""
+        return self.create_cronjob(
+            name="auto-solve",
+            prompt=(
+                "Run DeepSpace autonomous problem-solving: "
+                "cd ~/deepspace && source .venv/bin/activate && deepspace auto-solve -n 2\n"
+                "This derives goals from knowledge gaps, plans, executes, verifies, and learns."
+            ),
+            schedule=f"0 */{interval_hours} * * *",
+            skills=["deepspace"],
+        )
+
     def setup_all_schedules(self) -> dict:
         """Set up all recommended cronjobs."""
         results = {}
@@ -190,6 +203,7 @@ class HermesBridge:
             ("learn", self.schedule_learning_cycle(30)),
             ("daily_briefing", self.schedule_daily_briefing("09:00")),
             ("proactive", self.schedule_proactive_check(10)),
+            ("auto-solve", self.schedule_auto_solve(4)),
         ]
 
         for name, result in jobs:

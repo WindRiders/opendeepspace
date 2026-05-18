@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from core.llm_client import LLMClient
 from core.memory_engine import MemoryEngine
-from core.models import MemoryLayer, MemoryType
+from core.models import MemoryLayer, MemoryType, ExecutionMode
 from core.orchestrator import Orchestrator
 from core.proactive_service import ProactiveService
 from storage.pgvector_store import PgVectorStore, create_store
@@ -47,6 +47,12 @@ class ProjectRequest(BaseModel):
     path: str
     description: str = ""
     tech_stack: list[str] = []
+
+
+class SolveRequest(BaseModel):
+    goal: str
+    context: str = ""
+    mode: str = "semi_auto"  # plan_only | step_by_step | semi_auto | full_auto
 
 
 # ── App State ────────────────────────────────
@@ -376,9 +382,57 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # ── Health ───────────────────────────────────
 
+# ── Autonomous Execution Endpoints (NEW) ──
+
+@app.post("/solve")
+async def api_solve(request: SolveRequest):
+    """Execute autonomous problem-solving: Goal → Plan → Execute → Verify → Learn."""
+    config = load_config()
+    engine = await get_engine(config)
+    orch = Orchestrator(engine, engine.llm, config)
+
+    mode = ExecutionMode(request.mode) if request.mode else ExecutionMode.SEMI_AUTO
+
+    result = await orch.solve_goal(
+        description=request.goal,
+        context=request.context,
+        mode=mode,
+    )
+    return result
+
+
+@app.get("/executions")
+async def api_executions(limit: int = 20):
+    """Get execution history."""
+    config = load_config()
+    engine = await get_engine(config)
+    orch = Orchestrator(engine, engine.llm, config)
+    return {"executions": orch.execution_history[-limit:]}
+
+
+@app.post("/orchestrator/auto-solve")
+async def api_auto_solve():
+    """Derive and solve self-derived goals from knowledge gaps."""
+    config = load_config()
+    engine = await get_engine(config)
+    orch = Orchestrator(engine, engine.llm, config)
+    results = await orch.solve_self_derived_goals(max_goals=2)
+    return {"results": results}
+
+
+@app.get("/goals")
+async def api_goals():
+    """Get self-derived goals from reflection gaps."""
+    config = load_config()
+    engine = await get_engine(config)
+    orch = Orchestrator(engine, engine.llm, config)
+    goals = await orch.derive_goals(max_goals=5)
+    return {"goals": goals}
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": "0.2.0", "agents": 9, "features": ["memory", "graph", "learn", "execute", "recover"]}
 
 
 # ── Main ─────────────────────────────────────

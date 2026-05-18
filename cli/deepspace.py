@@ -746,6 +746,99 @@ def solve(ctx, goal, context, mode):
 
 
 @cli.command()
+@click.option("--max-goals", "-n", default=2, help="Max self-derived goals to solve")
+@click.pass_context
+def auto_solve(ctx, max_goals):
+    """Derive and autonomously solve goals from knowledge gaps."""
+    from core.orchestrator import Orchestrator
+
+    async def _run():
+        config = load_config(ctx.obj["config_path"])
+        engine = await init_engine(config)
+        orch = Orchestrator(engine, engine.llm, config)
+
+        console.print(f"[bold]Auto-Solve:[/] Finding knowledge gaps to address...\n")
+
+        with console.status("[bold blue]Deriving goals from reflection...[/]"):
+            goals = await orch.derive_goals(max_goals=max_goals)
+
+        if not goals:
+            console.print("[yellow]No high-priority knowledge gaps found.[/]")
+            return
+
+        table = Table(title="Self-Derived Goals")
+        table.add_column("#", style="dim", width=3)
+        table.add_column("Topic", width=30)
+        table.add_column("Priority", width=10)
+        table.add_column("Reason", width=50)
+
+        for i, g in enumerate(goals):
+            table.add_row(
+                str(i), g.get("topic", "")[:30],
+                f"{g.get('priority', 0):.2f}",
+                g.get("context", "")[:50],
+            )
+        console.print(table)
+
+        with console.status("[bold green]Auto-solving...[/]"):
+            results = await orch.solve_self_derived_goals(max_goals=max_goals)
+
+        console.print(f"\n[bold]Auto-Solve Results:[/]")
+        for r in results:
+            outcome_style = {"success": "green", "partial_success": "yellow",
+                             "failed": "red", "error": "red"}
+            style = outcome_style.get(r.get("outcome", "failed"), "red")
+            console.print(
+                f"  [{style}]{r['outcome']}[/] — {r.get('goal', '')[:60]} "
+                f"({r.get('steps', 0)} steps)"
+            )
+        console.print(f"\n[dim]Results stored in memory for future use.[/]")
+
+    asyncio.run(_run())
+
+
+@cli.command()
+@click.option("--limit", "-n", default=10)
+@click.pass_context
+def executions(ctx, limit):
+    """Show autonomous execution history."""
+    from core.orchestrator import Orchestrator
+
+    async def _run():
+        config = load_config(ctx.obj["config_path"])
+        engine = await init_engine(config)
+        orch = Orchestrator(engine, engine.llm, config)
+
+        history = orch.execution_history[-limit:]
+
+        if not history:
+            console.print("[yellow]No execution history yet.[/]")
+            return
+
+        table = Table(title=f"Execution History (last {len(history)})")
+        table.add_column("#", style="dim", width=3)
+        table.add_column("Goal", width=50)
+        table.add_column("Outcome", width=16)
+        table.add_column("Steps", width=8)
+        table.add_column("Time")
+
+        for i, entry in enumerate(reversed(history)):
+            outcome_style = {"success": "green", "partial_success": "yellow",
+                             "failed": "red", "planned_only": "blue"}
+            style = outcome_style.get(entry.get("outcome", "failed"), "red")
+            table.add_row(
+                str(i + 1),
+                entry.get("goal", "")[:50],
+                f"[{style}]{entry.get('outcome', '?')}[/]",
+                f"{entry.get('steps_passed', 0)}/{entry.get('steps_total', 0)}",
+                entry.get("timestamp", "")[:19],
+            )
+        console.print(table)
+
+    asyncio.run(_run())
+
+
+@cli.command()
 @click.option("--port", "-p", default=8645, help="API server port")
 @click.option("--host", "-h", default="127.0.0.1", help="API server host")
 @click.pass_context

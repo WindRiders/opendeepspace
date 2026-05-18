@@ -66,6 +66,7 @@ class Orchestrator:
 
         self._running = False
         self._tasks: dict[str, asyncio.Task] = {}
+        self._execution_history: list[dict] = []  # Store solve results
 
     # ── Agent Dispatch ─────────────────────────
 
@@ -389,7 +390,7 @@ class Orchestrator:
             results["outcome"] = "planned_only"
             return results
 
-        # Phase 3: Execute + Verify (step by step)
+# Phase 3: Execute + Verify (step by step, with autonomous recovery)
         for step in execution_plan.steps:
             # Check dependencies
             deps_satisfied = all(
@@ -417,12 +418,65 @@ class Orchestrator:
             verification = verify_result.get("verification", {})
             passed = verification.get("passed", False)
 
+            # ── Autonomous Recovery (NEW) ──
+            recovery_attempts = 0
+            if not passed and mode in (ExecutionMode.SEMI_AUTO, ExecutionMode.FULL_AUTO):
+                while recovery_attempts < 2:
+                    recovery_attempts += 1
+                    logger.info(
+                        f"RECOVERY: Step {step.step_number} failed — "
+                        f"attempting autonomous recovery ({recovery_attempts}/2)"
+                    )
+
+                    # 1. Research: understand the error
+                    fix = await self._recovery_research(step, exec_data)
+                    if not fix:
+                        break
+
+                    # 2. Apply fix
+                    fix_result = await self._recovery_apply(step, fix)
+                    if not fix_result:
+                        break
+
+                    # 3. Retry the original step
+                    retry_step = ActionStep(
+                        step_number=step.step_number,
+                        description=f"[RECOVERY RETRY] {step.description}",
+                        command=step.command,
+                        expected_outcome=step.expected_outcome,
+                    )
+                    retry_result = await self._agent_action(step=retry_step)
+                    retry_data = retry_result.get("result", {})
+
+                    # 4. Re-verify
+                    retry_verify = await self._agent_verification(
+                        step=step,
+                        result=ActionResult(**retry_data) if retry_data else ActionResult(
+                            step_id=step.id, step_number=step.step_number,
+                            status=StepStatus.FAILED,
+                        ),
+                    )
+                    retry_verification = retry_verify.get("verification", {})
+
+                    if retry_verification.get("passed"):
+                        exec_data = retry_data
+                        verification = retry_verification
+                        passed = True
+                        logger.info(
+                            f"RECOVERY: Step {step.step_number} recovered "
+                            f"after {recovery_attempts} attempt(s)"
+                        )
+                        break
+
+            # ── End Recovery ──
+
             results["execution"].append({
                 "step": step.step_number,
                 "description": step.description,
                 "status": exec_data.get("status", "failed"),
                 "exit_code": exec_data.get("exit_code", -1),
                 "duration_seconds": exec_data.get("duration_seconds", 0),
+                "recovery_attempts": recovery_attempts,
             })
 
             results["verification"].append({
@@ -433,7 +487,6 @@ class Orchestrator:
             })
 
             if mode == ExecutionMode.STEP_BY_STEP:
-                # In step-by-step mode, stop after each step for user review
                 break
 
         # Phase 4: Learn from results
@@ -452,6 +505,18 @@ class Orchestrator:
 
         goal.status = StepStatus.COMPLETED if results["outcome"] == "success" else StepStatus.FAILED
         goal.completed_at = now_utc()
+
+        # Record in history
+        self._execution_history.append({
+            "goal": results["goal"],
+            "outcome": results["outcome"],
+            "steps_total": len(results.get("execution", [])),
+            "steps_passed": success_count,
+            "timestamp": now_utc().isoformat(),
+        })
+        # Keep last 100
+        if len(self._execution_history) > 100:
+            self._execution_history = self._execution_history[-100:]
 
         logger.info(
             f"SOLVE: Complete — {results['outcome']} "
@@ -596,3 +661,173 @@ class Orchestrator:
         self._running = False
         self.learner.stop()
         logger.info("Orchestrator stopped")
+
+    # ── Autonomous Recovery (NEW) ──────────────
+
+    async def _recovery_research(
+        self, step: ActionStep, exec_data: dict
+    ) -> Optional[str]:
+        """Research why a step failed and generate a fix command."""
+        stderr = exec_data.get("stderr", "")
+        stdout = exec_data.get("stdout", "")
+
+        try:
+            fix = await self.llm.chat_structured(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "A command failed during autonomous execution. "
+                            "Analyze the error and generate a SINGLE shell command "
+                            "that will fix the issue. The fix command should be safe "
+                            "and idempotent. If the problem is not fixable with a "
+                            "shell command, return an empty command.\n\n"
+                            "Common fixes: install missing packages, create directories, "
+                            "fix permissions, update configs, restart services."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Failed command: {step.command}\n"
+                            f"Exit code: {exec_data.get('exit_code', -1)}\n"
+                            f"Stdout: {stdout[:500]}\n"
+                            f"Stderr: {stderr[:500]}"
+                        ),
+                    },
+                ],
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "fix_command": {"type": "string"},
+                        "explanation": {"type": "string"},
+                        "confidence": {"type": "number"},
+                    },
+                },
+            )
+
+            fix_cmd = fix.get("fix_command", "").strip()
+            if fix_cmd and fix.get("confidence", 0) >= 0.5:
+                logger.info(
+                    f"RECOVERY: Generated fix — {fix_cmd[:80]} "
+                    f"(confidence: {fix.get('confidence', 0):.2f})"
+                )
+                return fix_cmd
+
+            logger.warning(
+                f"RECOVERY: No viable fix generated "
+                f"(confidence: {fix.get('confidence', 0):.2f})"
+            )
+            return None
+        except Exception as e:
+            logger.error(f"RECOVERY: Research failed: {e}")
+            return None
+
+    async def _recovery_apply(
+        self, step: ActionStep, fix_command: str
+    ) -> bool:
+        """Apply a fix command. Returns True if fix succeeded."""
+        try:
+            fix_step = ActionStep(
+                step_number=-1,  # Special: recovery step
+                description=f"Auto-fix for step {step.step_number}",
+                command=fix_command,
+                timeout_seconds=60,
+            )
+            result = await self.executor.execute_with_retry(fix_step)
+
+            if result.status == StepStatus.COMPLETED:
+                logger.info(f"RECOVERY: Fix applied successfully")
+                return True
+
+            logger.warning(
+                f"RECOVERY: Fix failed (exit {result.exit_code}): {result.stderr[:100]}"
+            )
+            return False
+        except Exception as e:
+            logger.error(f"RECOVERY: Apply failed: {e}")
+            return False
+
+    # ── Self-Derived Goals (NEW) ────────────────
+
+    async def derive_goals(self, max_goals: int = 3) -> list[dict]:
+        """
+        Derive actionable goals from reflection gaps and context.
+        This is the core of autonomous initiative — the system finds
+        its own problems to solve.
+        """
+        reflection = await self.engine.reflect()
+        context = await self.proactive.detect_context()
+
+        gaps = reflection.get("gaps", [])
+        if not gaps:
+            return []
+
+        # Filter to high-priority gaps
+        high_priority = [g for g in gaps if g.get("priority", 0) >= 0.5][:max_goals]
+        if not high_priority:
+            return []
+
+        goals = []
+        for gap in high_priority:
+            topic = gap.get("topic", "")
+            reason = gap.get("reason", "")
+
+            goals.append({
+                "description": f"Research and understand: {topic}",
+                "context": f"Knowledge gap identified during reflection. Reason: {reason}",
+                "source": "self-derived",
+                "priority": gap.get("priority", 0.5),
+                "topic": topic,
+            })
+
+        logger.info(f"DERIVE: Generated {len(goals)} self-derived goals from {len(gaps)} gaps")
+        return goals
+
+    async def solve_self_derived_goals(self, max_goals: int = 2) -> list[dict]:
+        """
+        Derive goals from knowledge gaps and autonomously solve them.
+        This runs in the background — no user interaction needed.
+        """
+        goals = await self.derive_goals(max_goals=max_goals)
+        results = []
+
+        for goal_data in goals:
+            logger.info(f"AUTO-SOLVE: Starting self-derived goal — {goal_data['description'][:80]}")
+
+            try:
+                result = await self.solve_goal(
+                    description=goal_data["description"],
+                    context=goal_data.get("context", ""),
+                    mode=ExecutionMode.FULL_AUTO,
+                )
+                results.append({
+                    "goal": goal_data["description"],
+                    "outcome": result.get("outcome", "failed"),
+                    "steps": len(result.get("execution", [])),
+                })
+
+                # Remember this was a self-derived goal
+                await self.engine.remember(
+                    content=f"Self-derived goal: {goal_data['description']}. Outcome: {result.get('outcome')}",
+                    layer=MemoryLayer.WORKING,
+                    memory_type=MemoryType.EXPERIENCE,
+                    tags=["autonomous", "self-derived", result.get("outcome", "failed")],
+                    source="orchestrator-auto-solve",
+                    auto_summarize=False,
+                    auto_embed=True,
+                    auto_graph=False,
+                )
+            except Exception as e:
+                logger.error(f"AUTO-SOLVE: Failed for '{goal_data['description'][:60]}': {e}")
+                results.append({
+                    "goal": goal_data["description"],
+                    "outcome": "error",
+                    "error": str(e),
+                })
+
+        return results
+
+    @property
+    def execution_history(self) -> list[dict]:
+        return list(self._execution_history)
