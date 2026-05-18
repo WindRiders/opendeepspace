@@ -2,7 +2,24 @@
 
 All notable changes to DeepSpace will be documented in this file.
 
-## [0.2.0] - 2026-05-18
+## [0.4.0] - 2026-05-18
+
+### Added
+
+- **Web Dashboard**: Dark-themed SPA at `/dashboard` with Overview, Memories, Knowledge Graph, and Executions tabs
+- **Export/Import**: `deepspace export` (JSON/Markdown) and `deepspace import-memories` with dry-run support
+- **Log Viewer**: `deepspace logs --follow` with level filtering (DEBUG/INFO/WARNING/ERROR) and color-coded output
+- **Error Handling**: Standardized `ErrorCode` enum (25 codes), 6 custom exception classes, API error handlers
+- **Integration Tests**: 9 real-database tests requiring Docker (auto-skip in CI without Docker)
+- **Dashboard API**: Error middleware, HTML template serving
+
+### Changed
+
+- Version bumped to 0.4.0
+- CLI upgraded to 24 commands
+- Health endpoint enriched with features list
+
+## [0.3.0] - 2026-05-18
 
 ### Added
 

@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepSpace Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #c9d1d9; --dim: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d2991d;
+    --purple: #bc8cff; --orange: #db6d28;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.5; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 24px; font-weight: 600; }
+  header .version { color: var(--dim); font-size: 13px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+  .tab { padding: 8px 16px; border: none; background: none; color: var(--dim); cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; transition: all .2s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .stat .label { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; }
+  .stat .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+  .stat .value.green { color: var(--green); }
+  .stat .value.blue { color: var(--accent); }
+  .stat .value.purple { color: var(--purple); }
+  .stat .value.orange { color: var(--orange); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .card h3 { font-size: 16px; margin-bottom: 12px; color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 12px; color: var(--dim); font-weight: 600; border-bottom: 1px solid var(--border); font-size: 12px; text-transform: uppercase; }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: rgba(88,166,255,.04); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .badge.green { background: rgba(63,185,80,.15); color: var(--green); }
+  .badge.red { background: rgba(248,81,73,.15); color: var(--red); }
+  .badge.yellow { background: rgba(210,153,29,.15); color: var(--yellow); }
+  .badge.blue { background: rgba(88,166,255,.15); color: var(--accent); }
+  .loading { text-align: center; padding: 40px; color: var(--dim); }
+  .error { background: rgba(248,81,73,.1); border: 1px solid rgba(248,81,73,.3); border-radius: 8px; padding: 16px; color: var(--red); }
+  .empty { text-align: center; padding: 40px; color: var(--dim); font-style: italic; }
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; background: rgba(88,166,255,.1); color: var(--accent); font-size: 11px; margin-right: 4px; }
+  .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .progress-bar .fill { height: 100%; border-radius: 3px; transition: width .3s; }
+  .actions { display: flex; gap: 8px; margin-top: 12px; }
+  button { padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); cursor: pointer; font-size: 13px; transition: all .2s; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.danger { color: var(--red); }
+  .search-box { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; margin-bottom: 16px; }
+  .search-box:focus { outline: none; border-color: var(--accent); }
+  @media (max-width: 600px) { .container { padding: 12px; } .grid { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div>
+      <h1>DeepSpace Dashboard</h1>
+      <span class="version">v<span id="version">...</span> · <span id="agentCount">?</span> agents · <span id="featureList"></span></span>
+    </div>
+    <div class="actions">
+      <button onclick="refreshAll()">Refresh</button>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('overview')">Overview</button>
+    <button class="tab" onclick="switchTab('memories')">Memories</button>
+    <button class="tab" onclick="switchTab('graph')">Knowledge Graph</button>
+    <button class="tab" onclick="switchTab('executions')">Executions</button>
+  </div>
+
+  <div id="tab-content"></div>
+</div>
+
+<script>
+const API = '';
+
+async function fetchJSON(url) {
+  const r = await fetch(API + url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('tab-content').innerHTML = '<div class="loading">Loading...</div>';
+  const loaders = { overview: loadOverview, memories: loadMemories, graph: loadGraph, executions: loadExecutions };
+  (loaders[tab] || loadOverview)();
+}
+
+async function loadHealth() {
+  try {
+    const h = await fetchJSON('/health');
+    document.getElementById('version').textContent = h.version || '?';
+    document.getElementById('agentCount').textContent = h.agents || '?';
+    document.getElementById('featureList').textContent = (h.features || []).join(' · ');
+  } catch(e) {}
+}
+
+async function loadOverview() {
+  try {
+    const [stats, ref, exec, goals] = await Promise.all([
+      fetchJSON('/stats').catch(() => null),
+      fetchJSON('/reflect').catch(() => null),
+      fetchJSON('/executions?limit=5').catch(() => null),
+      fetchJSON('/goals').catch(() => null),
+    ]);
+
+    let html = '<div class="grid">';
+    if (stats) {
+      html += `<div class="stat"><div class="label">Total Memories</div><div class="value blue">${stats.total_memories}</div></div>`;
+      const layers = stats.by_layer || {};
+      for (const [layer, count] of Object.entries(layers)) {
+        html += `<div class="stat"><div class="label">${layer}</div><div class="value">${count}</div></div>`;
+      }
+    }
+    html += '</div>';
+
+    if (ref && ref.knowledge_summary) {
+      html += `<div class="card"><h3>Knowledge Summary</h3><p>${ref.knowledge_summary}</p></div>`;
+    }
+    if (ref && ref.gaps && ref.gaps.length) {
+      html += '<div class="card"><h3>Top Knowledge Gaps</h3>';
+      for (const g of ref.gaps.slice(0, 5)) {
+        const pct = Math.round((g.priority || 0) * 100);
+        html += `<div style="margin-bottom:10px"><strong>${esc(g.topic)}</strong> <span style="color:var(--dim);font-size:12px">priority: ${pct}%</span>
+          <div class="progress-bar"><div class="fill" style="width:${pct}%;background:var(--yellow)"></div></div></div>`;
+      }
+      html += '</div>';
+    }
+
+    if (goals && goals.goals && goals.goals.length) {
+      html += `<div class="card"><h3>Self-Derived Goals</h3>`;
+      for (const g of goals.goals) {
+        html += `<div style="margin-bottom:8px"><span class="badge blue">${esc(g.topic || '')}</span> <span style="color:var(--dim);font-size:12px">${esc((g.context||'').slice(0,80))}</span></div>`;
+      }
+      html += '</div>';
+    }
+
+    if (exec && exec.executions && exec.executions.length) {
+      html += `<div class="card"><h3>Recent Executions</h3>
+        <table><tr><th>Goal</th><th>Outcome</th><th>Steps</th><th>Time</th></tr>`;
+      for (const e of exec.executions.slice(-5).reverse()) {
+        const badge = e.outcome === 'success' ? 'green' : e.outcome === 'partial_success' ? 'yellow' : 'red';
+        html += `<tr><td>${esc((e.goal||'').slice(0,60))}</td>
+          <td><span class="badge ${badge}">${e.outcome}</span></td>
+          <td>${e.steps_passed}/${e.steps_total}</td>
+          <td style="color:var(--dim)">${(e.timestamp||'').slice(0,19)}</td></tr>`;
+      }
+      html += '</table></div>';
+    }
+
+    document.getElementById('tab-content').innerHTML = html;
+  } catch(e) {
+    document.getElementById('tab-content').innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+async function loadMemories() {
+  try {
+    const stats = await fetchJSON('/stats').catch(() => null);
+    let html = '';
+    if (stats) {
+      html += `<div class="grid">
+        <div class="stat"><div class="label">Total</div><div class="value blue">${stats.total_memories}</div></div>
+      `;
+      for (const [layer, count] of Object.entries(stats.by_layer || {})) {
+        html += `<div class="stat"><div class="label">${layer}</div><div class="value">${count}</div></div>`;
+      }
+      html += '</div>';
+    }
+    html += `<input class="search-box" placeholder="Search memories..." onkeyup="if(event.key==='Enter') searchMemories(this.value)">`;
+    html += '<div id="memory-results"><div class="empty">Type a query and press Enter to search</div></div>';
+    document.getElementById('tab-content').innerHTML = html;
+  } catch(e) {
+    document.getElementById('tab-content').innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+async function searchMemories(query) {
+  const container = document.getElementById('memory-results');
+  container.innerHTML = '<div class="loading">Searching...</div>';
+  try {
+    const r = await fetch(API + '/recall', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query, top_k: 20})
+    });
+    const data = await r.json();
+    const results = data.results || [];
+
+    if (!results.length) {
+      container.innerHTML = '<div class="empty">No memories found</div>';
+      return;
+    }
+
+    let html = `<table><tr><th>ID</th><th>Content</th><th>Layer</th><th>Type</th><th>Importance</th></tr>`;
+    for (const m of results) {
+      html += `<tr>
+        <td style="font-family:monospace;font-size:11px;color:var(--dim)">${esc(m.id||'').slice(0,12)}</td>
+        <td>${esc((m.summary || m.content || '').slice(0,80))}</td>
+        <td><span class="badge blue">${esc(m.layer)}</span></td>
+        <td>${esc(m.memory_type)}</td>
+        <td>${(m.importance||0).toFixed(2)}</td>
+      </tr>`;
+    }
+    html += '</table>';
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+async function loadGraph() {
+  try {
+    let html = '<input class="search-box" placeholder="Search entities (e.g., PostgreSQL, Neo4j)..." onkeyup="if(event.key===\'Enter\') searchGraph(this.value)">';
+    html += '<div id="graph-results"><div class="empty">Type a query and press Enter to search</div></div>';
+    document.getElementById('tab-content').innerHTML = html;
+  } catch(e) {
+    document.getElementById('tab-content').innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+async function searchGraph(query) {
+  const container = document.getElementById('graph-results');
+  container.innerHTML = '<div class="loading">Searching...</div>';
+  try {
+    const r = await fetch(API + '/graph/search?q=' + encodeURIComponent(query));
+    const data = await r.json();
+    const entities = data.entities || [];
+
+    if (!entities.length) {
+      container.innerHTML = '<div class="empty">No entities found</div>';
+      return;
+    }
+
+    let html = `<table><tr><th>Name</th><th>Type</th><th>Description</th><th>Confidence</th><th>Actions</th></tr>`;
+    for (const e of entities) {
+      html += `<tr>
+        <td><strong>${esc(e.name)}</strong></td>
+        <td><span class="badge blue">${esc(e.type)}</span></td>
+        <td>${esc((e.description||'').slice(0,80))}</td>
+        <td>${(e.confidence||0).toFixed(2)}</td>
+        <td><button onclick="loadNeighbors('${esc(e.name)}')">Neighbors</button></td>
+      </tr>`;
+    }
+    html += '</table><div id="neighbors-view"></div>';
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+async function loadNeighbors(name) {
+  const view = document.getElementById('neighbors-view');
+  view.innerHTML = '<div class="loading">Loading neighbors...</div>';
+  try {
+    const r = await fetch(API + '/graph/neighbors/' + encodeURIComponent(name));
+    const data = await r.json();
+    const relations = data.relations || [];
+    if (!relations.length) {
+      view.innerHTML = '<div class="empty">No neighbors found</div>';
+      return;
+    }
+    let html = `<h4 style="margin:16px 0 8px;color:var(--accent)">Neighbors of ${esc(name)}</h4><table><tr><th>Source</th><th>Relation</th><th>Target</th></tr>`;
+    for (const rel of relations) {
+      html += `<tr><td>${esc(rel.source)}</td><td style="color:var(--yellow)">${esc(rel.relation)}</td><td>${esc(rel.target)}</td></tr>`;
+    }
+    html += '</table>';
+    view.innerHTML = html;
+  } catch(e) {
+    view.innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+async function loadExecutions() {
+  try {
+    const r = await fetchJSON('/executions?limit=30');
+    const execs = r.executions || [];
+
+    if (!execs.length) {
+      document.getElementById('tab-content').innerHTML = '<div class="empty">No executions yet. Try: deepspace solve "..."</div>';
+      return;
+    }
+
+    const stats = { success: 0, partial_success: 0, failed: 0 };
+    for (const e of execs) { stats[e.outcome] = (stats[e.outcome]||0) + 1; }
+
+    let html = `<div class="grid">
+      <div class="stat"><div class="label">Total</div><div class="value blue">${execs.length}</div></div>
+      <div class="stat"><div class="label">Success</div><div class="value green">${stats.success||0}</div></div>
+      <div class="stat"><div class="label">Partial</div><div class="value" style="color:var(--yellow)">${stats.partial_success||0}</div></div>
+      <div class="stat"><div class="label">Failed</div><div class="value" style="color:var(--red)">${stats.failed||0}</div></div>
+    </div>`;
+
+    html += `<table><tr><th>#</th><th>Goal</th><th>Outcome</th><th>Steps</th><th>Time</th></tr>`;
+    for (let i = execs.length-1; i >= 0; i--) {
+      const e = execs[i];
+      const badge = e.outcome === 'success' ? 'green' : e.outcome === 'partial_success' ? 'yellow' : 'red';
+      html += `<tr><td style="color:var(--dim)">${execs.length - i}</td>
+        <td>${esc((e.goal||'').slice(0,60))}</td>
+        <td><span class="badge ${badge}">${e.outcome}</span></td>
+        <td>${e.steps_passed}/${e.steps_total}</td>
+        <td style="color:var(--dim)">${(e.timestamp||'').slice(0,19)}</td></tr>`;
+    }
+    html += '</table>';
+    document.getElementById('tab-content').innerHTML = html;
+  } catch(e) {
+    document.getElementById('tab-content').innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function refreshAll() { loadHealth(); switchTab('overview'); }
+
+// Startup
+loadHealth();
+loadOverview();
+</script>
+</body>
+</html>

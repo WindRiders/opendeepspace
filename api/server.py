@@ -10,13 +10,15 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core.llm_client import LLMClient
 from core.memory_engine import MemoryEngine
 from core.models import MemoryLayer, MemoryType, ExecutionMode
 from core.orchestrator import Orchestrator
+from core.errors import DeepSpaceError
 from core.proactive_service import ProactiveService
 from storage.pgvector_store import PgVectorStore, create_store
 from storage.neo4j_store import Neo4jGraphStore, create_graph_store
@@ -430,9 +432,41 @@ async def api_goals():
     return {"goals": goals}
 
 
+# ── Error Handler (NEW) ───────────────────────
+
+@app.exception_handler(DeepSpaceError)
+async def deepspace_error_handler(request, exc: DeepSpaceError):
+    return JSONResponse(
+        status_code=500,
+        content=exc.to_dict(),
+    )
+
+
+@app.exception_handler(Exception)
+async def general_error_handler(request, exc: Exception):
+    logger.error(f"Unhandled error: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": True, "code": "INTERNAL_ERROR", "message": str(exc)},
+    )
+
+
+# ── Dashboard (NEW) ───────────────────────────
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    """Serve the web dashboard UI."""
+    import os as _os
+    path = _os.path.join(_os.path.dirname(__file__), "..", "templates", "dashboard.html")
+    if _os.path.exists(path):
+        with open(path) as f:
+            return f.read()
+    return "<h1>Dashboard template not found</h1>"
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.2.0", "agents": 9, "features": ["memory", "graph", "learn", "execute", "recover"]}
+    return {"status": "ok", "version": "0.4.0", "agents": 9, "features": ["memory", "graph", "learn", "execute", "recover", "dashboard", "export"]}
 
 
 # ── Main ─────────────────────────────────────

@@ -26,7 +26,7 @@ from core.models import MemoryLayer, MemoryType
 from storage.pgvector_store import PgVectorStore, create_store
 from storage.neo4j_store import Neo4jGraphStore, create_graph_store
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 console = Console()
 logger = logging.getLogger("deepspace")
@@ -1001,6 +1001,250 @@ def executions(ctx, limit):
         console.print(table)
 
     asyncio.run(_run())
+
+
+@cli.command()
+@click.argument("output_path", type=click.Path())
+@click.option("--format", "-f", "fmt", type=click.Choice(["json", "markdown", "md"]),
+              default="json", help="Export format")
+@click.option("--layer", "-l", type=click.Choice([l.value for l in MemoryLayer]),
+              default=None, help="Filter by layer")
+@click.option("--project", "-p", default=None, help="Filter by project")
+@click.option("--limit", "-n", default=1000, help="Max memories to export")
+@click.pass_context
+def export(ctx, output_path, fmt, layer, project, limit):
+    """Export memories to a file.
+
+    Examples:
+      deepspace export memories.json
+      deepspace export memories.md -f markdown
+      deepspace export project.json -p timemap
+    """
+    async def _run():
+        config = load_config(ctx.obj["config_path"])
+        engine = await init_engine(config)
+
+        # Fetch memories
+        all_memories = []
+        layer_filter = MemoryLayer(layer) if layer else None
+        if layer_filter:
+            memories = await engine.vector_store.get_by_layer(layer_filter, limit=limit)
+            all_memories = memories
+        else:
+            for l in MemoryLayer:
+                memories = await engine.vector_store.get_by_layer(l, limit=limit // 4)
+                all_memories.extend(memories)
+
+        # Filter by project
+        if project:
+            all_memories = [m for m in all_memories if m.project == project]
+
+        all_memories = all_memories[:limit]
+        console.print(f"[bold]Exporting {len(all_memories)} memories...[/]")
+
+        out_path = Path(output_path)
+        if fmt in ("markdown", "md"):
+            lines = [f"# DeepSpace Memory Export\n",
+                     f"Exported: {now_utc().isoformat()}\n",
+                     f"Count: {len(all_memories)}\n\n"]
+            for m in all_memories:
+                lines.append(f"## [{m.layer.value}] {m.memory_type.value} — importance: {m.importance:.2f}\n")
+                lines.append(f"{m.content}\n")
+                if m.tags:
+                    lines.append(f"Tags: {', '.join(m.tags)}\n")
+                lines.append("---\n\n")
+            out_path.write_text("\n".join(lines))
+        else:
+            import json as _json
+            data = {
+                "exported_at": now_utc().isoformat(),
+                "version": VERSION,
+                "count": len(all_memories),
+                "memories": [m.model_dump() for m in all_memories],
+            }
+            # Convert datetime
+            for mem in data["memories"]:
+                if "created_at" in mem and hasattr(mem["created_at"], "isoformat"):
+                    mem["created_at"] = mem["created_at"].isoformat()
+                if "last_accessed" in mem and hasattr(mem["last_accessed"], "isoformat"):
+                    mem["last_accessed"] = mem["last_accessed"].isoformat()
+            out_path.write_text(_json.dumps(data, ensure_ascii=False, indent=2, default=str))
+
+        console.print(f"[green]Exported to {out_path.resolve()}[/]")
+
+    import json as _json
+    from core.models import now_utc
+    asyncio.run(_run())
+
+
+@cli.command()
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--dry-run", is_flag=True, help="Preview without importing")
+@click.pass_context
+def import_memories(ctx, file_path, dry_run):
+    """Import memories from a JSON or Markdown file.
+
+    Supports files exported by 'deepspace export'.
+
+    Examples:
+      deepspace import-memories memories.json
+      deepspace import-memories memories.md --dry-run
+    """
+    async def _run():
+        config = load_config(ctx.obj["config_path"])
+        engine = await init_engine(config)
+
+        path = Path(file_path)
+        content = path.read_text()
+
+        memories_to_import = []
+
+        if path.suffix in (".json",):
+            import json as _json
+            data = _json.loads(content)
+            raw_memories = data.get("memories", [])
+            console.print(f"[bold]Found {len(raw_memories)} memories in JSON file[/]")
+            for raw in raw_memories:
+                try:
+                    mem = Memory(
+                        content=raw.get("content", ""),
+                        summary=raw.get("summary", ""),
+                        layer=MemoryLayer(raw.get("layer", "short_term")),
+                        memory_type=MemoryType(raw.get("memory_type", "fact")),
+                        importance=float(raw.get("importance", 0.5)),
+                        project=raw.get("project", ""),
+                        tags=raw.get("tags", []),
+                        source="import",
+                    )
+                    memories_to_import.append(mem)
+                except Exception as e:
+                    console.print(f"[yellow]Skipped invalid memory: {e}[/]")
+        elif path.suffix == ".md" or path.suffix == ".markdown":
+            # Simple markdown parser: split by ## headers
+            import re
+            sections = re.split(r'\n## ', content)
+            for section in sections[1:]:
+                lines = section.strip().split('\n')
+                if not lines:
+                    continue
+                header = lines[0].strip()
+                body_lines = []
+                for l in lines[1:]:
+                    if l.startswith('Tags:') or l.startswith('---'):
+                        break
+                    body_lines.append(l)
+                body = '\n'.join(body_lines).strip()
+                if body:
+                    memories_to_import.append(Memory(content=body, source="import"))
+            console.print(f"[bold]Found {len(memories_to_import)} memories in Markdown file[/]")
+        else:
+            console.print(f"[red]Unsupported format: {path.suffix}[/]")
+            return
+
+        if dry_run:
+            console.print(f"\n[bold]Dry run — would import {len(memories_to_import)} memories:[/]")
+            for i, m in enumerate(memories_to_import[:10]):
+                console.print(f"  {i+1}. {m.content[:80]}...")
+            if len(memories_to_import) > 10:
+                console.print(f"  ... and {len(memories_to_import) - 10} more")
+            return
+
+        imported = 0
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+            task = progress.add_task("Importing memories...", total=len(memories_to_import))
+            for mem in memories_to_import:
+                try:
+                    await engine.remember(
+                        content=mem.content,
+                        layer=mem.layer,
+                        memory_type=mem.memory_type,
+                        project=mem.project,
+                        tags=mem.tags,
+                        source="import",
+                        auto_summarize=False,
+                        auto_embed=True,
+                        auto_graph=(imported % 5 == 0),
+                    )
+                    imported += 1
+                except Exception as e:
+                    console.print(f"[yellow]Import failed for: {mem.content[:40]}... — {e}[/]")
+                progress.update(task, advance=1)
+
+        console.print(f"\n[green]Imported {imported}/{len(memories_to_import)} memories[/]")
+
+    from core.models import Memory, now_utc
+    asyncio.run(_run())
+
+
+@cli.command()
+@click.option("--follow", "-f", is_flag=True, help="Follow log output (tail -f)")
+@click.option("--lines", "-n", default=50, help="Number of lines to show")
+@click.option("--level", "-l", default="INFO", help="Filter by level: DEBUG, INFO, WARNING, ERROR")
+@click.pass_context
+def logs(ctx, follow, lines, level):
+    """View DeepSpace logs with optional live tail.
+
+    Examples:
+      deepspace logs           # Show last 50 lines
+      deepspace logs -f        # Follow live
+      deepspace logs -f -l DEBUG
+      deepspace logs -n 200
+    """
+    log_path = Path("data/deepspace.log")
+    if not log_path.exists():
+        log_path = Path.home() / "deepspace" / "data" / "deepspace.log"
+
+    if not log_path.exists():
+        console.print("[yellow]No log file found. DeepSpace may not have been started yet.[/]")
+        console.print("[dim]Start with: deepspace serve  or  deepspace orchestrate[/]")
+        return
+
+    levels_order = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
+    min_level = levels_order.get(level.upper(), 1)
+
+    def should_show(line: str) -> bool:
+        if level.upper() == "DEBUG":
+            return True
+        for lv_name, lv_val in levels_order.items():
+            if lv_name in line and lv_val >= min_level:
+                return True
+        # If no level marker, show it (could be a continuation line)
+        return not any(f"{name}" in line for name in levels_order)
+
+    def style_line(line: str) -> str:
+        if "ERROR" in line:
+            return f"[red]{line}[/]"
+        elif "WARNING" in line:
+            return f"[yellow]{line}[/]"
+        elif "DEBUG" in line:
+            return f"[dim]{line}[/]"
+        return line
+
+    if follow:
+        console.print(f"[bold]Following {log_path} (Ctrl+C to stop)[/]")
+        try:
+            with open(log_path) as f:
+                f.seek(0, 2)  # End of file
+                import time
+                while True:
+                    new_line = f.readline()
+                    if new_line:
+                        if should_show(new_line):
+                            console.print(style_line(new_line.rstrip()))
+                    else:
+                        time.sleep(0.5)
+        except KeyboardInterrupt:
+            console.print("\n[dim]Stopped[/]")
+    else:
+        # Just show last N lines
+        all_lines = log_path.read_text().split('\n')
+        filtered = [l for l in all_lines if l.strip() and should_show(l)]
+        shown = filtered[-lines:]
+
+        console.print(f"[bold]Last {len(shown)} log entries from {log_path}[/]")
+        console.print(f"[dim]Level filter: {level} | Use -f to follow live[/]\n")
+        for line in shown:
+            console.print(style_line(line))
 
 
 @cli.command()
