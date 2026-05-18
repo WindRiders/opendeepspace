@@ -428,3 +428,98 @@ class MemoryEngine:
             "total_memories": sum(layers.values()),
             "by_layer": layers,
         }
+
+    # ── Deduplication (NEW) ─────────────────
+
+    async def deduplicate(self, threshold: float = 0.85, dry_run: bool = False) -> dict:
+        """
+        Find and merge semantically similar memories.
+
+        Uses LLM to assess semantic similarity between pairs of memories
+        in the same layer. Merges near-duplicates above threshold.
+        """
+        all_memories = []
+        for layer in MemoryLayer:
+            mems = await self.vector_store.get_by_layer(layer, limit=500)
+            all_memories.extend(mems)
+
+        if len(all_memories) < 2:
+            return {"checked": len(all_memories), "merged": 0, "pairs": []}
+
+        # Group by layer
+        from collections import defaultdict
+        by_layer = defaultdict(list)
+        for m in all_memories:
+            by_layer[m.layer].append(m)
+
+        merged_count = 0
+        merged_pairs = []
+
+        for layer, mems in by_layer.items():
+            if len(mems) < 2:
+                continue
+
+            for i in range(len(mems)):
+                for j in range(i + 1, len(mems)):
+                    a, b = mems[i], mems[j]
+
+                    # Quick pre-filter: same type and similar length
+                    if a.memory_type != b.memory_type:
+                        continue
+                    len_diff = abs(len(a.content) - len(b.content)) / max(len(a.content), 1)
+                    if len_diff > 0.5:
+                        continue
+
+                    try:
+                        similarity = await self.llm.chat_structured(
+                            messages=[{
+                                "role": "system",
+                                "content": (
+                                    "Rate the semantic similarity of these two texts on a scale 0.0-1.0. "
+                                    "1.0 = identical meaning, 0.8+ = very similar (paraphrase), "
+                                    "0.5 = somewhat related, 0.0 = completely different. "
+                                    "Return ONLY a JSON with 'similarity' and 'reasoning'."
+                                ),
+                            }, {
+                                "role": "user",
+                                "content": f"Text A: {a.content[:500]}\n\nText B: {b.content[:500]}",
+                            }],
+                            output_schema={
+                                "type": "object",
+                                "properties": {
+                                    "similarity": {"type": "number"},
+                                    "reasoning": {"type": "string"},
+                                },
+                            },
+                            model=self.llm.light_model,
+                        )
+
+                        sim = float(similarity.get("similarity", 0))
+
+                        if sim >= threshold:
+                            merged_pairs.append({
+                                "keep": a.id,
+                                "merged": b.id,
+                                "similarity": sim,
+                                "content_a": a.content[:100],
+                                "content_b": b.content[:100],
+                            })
+
+                            if not dry_run:
+                                # Merge: update importance, add tags, delete duplicate
+                                combined_importance = max(a.importance, b.importance) + 0.05
+                                combined_tags = list(set(a.tags + b.tags))
+                                await self.vector_store.update_layer([a.id], a.layer)
+                                # Store updated metadata
+                                a.importance = min(combined_importance, 1.0)
+                                a.tags = combined_tags
+                                a.related_ids = list(set(a.related_ids + [b.id]))
+                                await self.vector_store.save_memory(a)
+                                await self.vector_store.delete_memories([b.id])
+
+                            merged_count += 1
+                    except Exception as e:
+                        logger.debug(f"Dedup comparison failed: {e}")
+
+        logger.info(f"DEDUP: Checked {len(all_memories)} memories, merged {merged_count} pairs")
+        return {"checked": len(all_memories), "merged": merged_count, "pairs": merged_pairs[:20]}

@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/tests-105%20passed-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-85%25-green" alt="Coverage">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
-  <img src="https://img.shields.io/badge/version-0.4.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.5.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/agents-9-orange" alt="Agents">
 </p>

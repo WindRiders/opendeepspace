@@ -248,6 +248,14 @@ class ProactiveService:
         self._last_push_time = now_utc()
         self._push_count_today += 1
 
+        # Desktop notification
+        from core.notifier import get_notifier
+        get_notifier().notify(
+            "DeepSpace",
+            message[:150],
+            subtitle=f"Push #{self._push_count_today}",
+        )
+
         logger.info(f"Push #{self._push_count_today}: {message[:80]}...")
         return message
 

@@ -20,6 +20,7 @@ from core.models import MemoryLayer, MemoryType, ExecutionMode
 from core.orchestrator import Orchestrator
 from core.errors import DeepSpaceError
 from core.proactive_service import ProactiveService
+from core.notifier import get_notifier
 from storage.pgvector_store import PgVectorStore, create_store
 from storage.neo4j_store import Neo4jGraphStore, create_graph_store
 
@@ -62,10 +63,21 @@ class SolveRequest(BaseModel):
 class AppState:
     def __init__(self):
         self.engine: Optional[MemoryEngine] = None
-        self.orchestrator: Optional[Orchestrator] = None
-        self.llm: Optional[LLMClient] = None
         self.proactive: Optional[ProactiveService] = None
+        self.llm: Optional[LLMClient] = None
+        self.ws_connections: list[WebSocket] = []  # Active WS clients
 
+    async def broadcast(self, data: dict):
+        """Broadcast to all connected WebSocket clients."""
+        disconnected = []
+        for ws in self.ws_connections:
+            try:
+                await ws.send_json(data)
+            except Exception:
+                disconnected.append(ws)
+        for ws in disconnected:
+            if ws in self.ws_connections:
+                self.ws_connections.remove(ws)
 
 state = AppState()
 
@@ -325,7 +337,8 @@ async def api_briefing():
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket for real-time DeepSpace updates."""
     await websocket.accept()
-    logger.info("WebSocket client connected")
+    state.ws_connections.append(websocket)
+    logger.info(f"WebSocket client connected ({len(state.ws_connections)} active)")
 
     try:
         # Send initial stats
@@ -347,7 +360,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif cmd == "push":
                 msg = await state.proactive.push()
-                await websocket.send_json({"type": "push", "message": msg})
+                if msg:
+                    await websocket.send_json({"type": "push", "message": msg})
+                    # Desktop notification
+                    get_notifier().notify("DeepSpace", msg, subtitle="Proactive Push")
+                else:
+                    await websocket.send_json({"type": "push", "message": None})
 
             elif cmd == "remember":
                 memory = await state.engine.remember(
@@ -377,7 +395,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"type": "error", "message": f"Unknown command: {cmd}"})
 
     except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected")
+        if websocket in state.ws_connections:
+            state.ws_connections.remove(websocket)
+        logger.info(f"WebSocket client disconnected ({len(state.ws_connections)} active)")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
 
@@ -400,6 +420,13 @@ async def api_solve(request: SolveRequest):
         context=request.context,
         mode=mode,
     )
+    # Broadcast update to dashboard
+    await state.broadcast({
+        "type": "orchestrator_update",
+        "goal": request.goal[:100],
+        "outcome": result.get("outcome"),
+        "steps": len(result.get("execution", [])),
+    })
     return result
 
 
@@ -464,9 +491,18 @@ async def dashboard():
     return "<h1>Dashboard template not found</h1>"
 
 
+@app.post("/dedup")
+async def api_dedup(threshold: float = 0.85, dry_run: bool = False):
+    """Find and merge semantically duplicate memories."""
+    config = load_config()
+    engine = await get_engine(config)
+    result = await engine.deduplicate(threshold=threshold, dry_run=dry_run)
+    return result
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.4.0", "agents": 9, "features": ["memory", "graph", "learn", "execute", "recover", "dashboard", "export"]}
+    return {"status": "ok", "version": "0.5.0", "agents": 9, "features": ["memory", "graph", "learn", "execute", "recover", "dashboard", "export", "dedup", "notify"]}
 
 
 # ── Main ─────────────────────────────────────

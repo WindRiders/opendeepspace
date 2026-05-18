@@ -6,6 +6,7 @@ DeepSpace CLI — Autonomous Learning Memory System.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -26,7 +27,7 @@ from core.models import MemoryLayer, MemoryType
 from storage.pgvector_store import PgVectorStore, create_store
 from storage.neo4j_store import Neo4jGraphStore, create_graph_store
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 console = Console()
 logger = logging.getLogger("deepspace")
@@ -84,8 +85,9 @@ async def init_engine(config: dict) -> MemoryEngine:
 @click.group(invoke_without_command=True)
 @click.option("--config", "-c", default="config/config.yaml", help="Config file path")
 @click.option("--version", "-V", is_flag=True, help="Show version and exit")
+@click.option("--json", "-j", "json_output", is_flag=True, help="Output in JSON format (machine-readable)")
 @click.pass_context
-def cli(ctx, config, version):
+def cli(ctx, config, version, json_output):
     """DeepSpace —   Autonomous Learning Memory System.
 
     Four-layer memory + Neo4j knowledge graph + autonomous learner
@@ -97,29 +99,40 @@ def cli(ctx, config, version):
       deepspace recall ...    # Search memories
       deepspace solve ...     # Autonomous problem-solving
 
+    All commands support --json/-j for machine-readable output.
     Docs: https://windriders.github.io/opendeepspace/
     """
     if version:
-        console.print(f"DeepSpace v{VERSION} — Autonomous Learning Memory System")
+        if json_output:
+            console.print_json(json.dumps({"version": VERSION, "name": "DeepSpace"}))
+        else:
+            console.print(f"DeepSpace v{VERSION} — Autonomous Learning Memory System")
         ctx.exit()
 
     if ctx.invoked_subcommand is None:
-        # Show a friendly overview
-        console.print(Panel.fit(
-            f"[bold cyan]DeepSpace v{VERSION}[/] —   Autonomous Learning Memory System\n\n"
-            f"[dim]Four-layer memory + Neo4j knowledge graph + autonomous execution[/]\n\n"
-            f"[bold]Quick start:[/]  deepspace init\n"
-            f"[bold]Store:[/]      deepspace remember \"content\"\n"
-            f"[bold]Search:[/]     deepspace recall \"query\"\n"
-            f"[bold]Auto-solve:[/] deepspace solve \"goal\"\n"
-            f"[bold]Full auto:[/]  deepspace auto-solve\n\n"
-            f"[dim]Run 'deepspace --help' for all commands.[/]",
-            title="  Welcome",
-            border_style="blue",
-        ))
+        if json_output:
+            console.print_json(json.dumps({
+                "version": VERSION,
+                "name": "DeepSpace",
+                "commands": sorted(cli.list_commands(ctx)),
+            }))
+        else:
+            console.print(Panel.fit(
+                f"[bold cyan]DeepSpace v{VERSION}[/] —   Autonomous Learning Memory System\n\n"
+                f"[dim]Four-layer memory + Neo4j knowledge graph + autonomous execution[/]\n\n"
+                f"[bold]Quick start:[/]  deepspace init\n"
+                f"[bold]Store:[/]      deepspace remember \"content\"\n"
+                f"[bold]Search:[/]     deepspace recall \"query\"\n"
+                f"[bold]Auto-solve:[/] deepspace solve \"goal\"\n"
+                f"[bold]Full auto:[/]  deepspace auto-solve\n\n"
+                f"[dim]Run 'deepspace --help' for all commands. '--json' for machine output.[/]",
+                title="  Welcome",
+                border_style="blue",
+            ))
 
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config
+    ctx.obj["json_output"] = json_output
 
 
 @cli.command()
@@ -999,6 +1012,32 @@ def executions(ctx, limit):
                 entry.get("timestamp", "")[:19],
             )
         console.print(table)
+
+    asyncio.run(_run())
+
+
+@cli.command()
+@click.option("--threshold", "-t", default=0.85, type=float, help="Similarity threshold (0.0-1.0)")
+@click.option("--dry-run", is_flag=True, help="Preview without merging")
+@click.pass_context
+def dedup(ctx, threshold, dry_run):
+    """Find and merge semantically duplicate memories using LLM similarity."""
+    async def _run():
+        config = load_config(ctx.obj["config_path"])
+        engine = await init_engine(config)
+
+        with console.status("[bold]Scanning for duplicate memories...[/]"):
+            result = await engine.deduplicate(threshold=threshold, dry_run=dry_run)
+
+        if ctx.obj.get("json_output"):
+            console.print_json(json.dumps(result, default=str))
+            return
+
+        console.print(f"\n[bold]Dedup:[/] Checked {result['checked']}, merged {result['merged']}")
+        if result.get("pairs"):
+            for i, p in enumerate(result["pairs"][:10]):
+                console.print(f"  {i+1}. {p['content_a'][:60]}  ~{p['similarity']:.2f}")
+            if dry_run: console.print("[yellow]Dry run — no changes[/]")
 
     asyncio.run(_run())
 
