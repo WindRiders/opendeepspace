@@ -1,250 +1,48 @@
-# DeepSpace —   Autonomous Learning Memory System
-
 <p align="center">
   <img src="https://img.shields.io/badge/tests-143%20passed-brightgreen" alt="Tests">
-  <img src="https://img.shields.io/badge/coverage-85%25-green" alt="Coverage">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
-  <img src="https://img.shields.io/badge/version-0.7.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.8.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/agents-9-orange" alt="Agents">
-  <img src="https://img.shields.io/badge/commands-29-brightgreen" alt="Commands">
+  <img src="https://img.shields.io/badge/commands-30-brightgreen" alt="Commands">
+  <img src="https://img.shields.io/badge/plugins-3-brightgreen" alt="Plugins">
 </p>
 
 > 一个基于大模型的自主学习记忆系统。**观察你的工作，构建知识图谱，自主学习，主动推送，自主解决问题。**
 
-DeepSpace 是一个运行在后台的 AI 记忆引擎。它不只是记住你说过什么——它会**主动思考**你还需要什么，**自己研究**知识空白，**自动执行**解决方案，然后**推送通知**告诉你结果。
+DeepSpace 运行在后台。它不只是记住你说过什么——它会**主动思考**你还需要什么，**自己研究**知识空白，**自动执行**解决方案，然后**推送通知**告诉你结果。
 
-##   What's New in v0.5.0
+##   What's New in v0.8
 
 | 功能 | 说明 |
 |------|------|
-|   Web Dashboard | `http://localhost:8645/dashboard` — 4个标签页，D3.js图谱可视化，WebSocket实时更新 |
-|   Desktop Notifications | macOS/Linux/Windows 原生通知，主动推送直达桌面 |
-|   Autonomous Execution | `deepspace solve "目标"` — Goal→Plan→Execute→Verify→Learn 闭环 |
-|   Self-Derived Goals | `deepspace auto-solve` — 从知识空白自动推导并执行目标 |
-|   Autonomous Recovery | 执行失败自动研究修复、重试（最多2次） |
-|   Export/Import | JSON/Markdown 格式导出导入记忆 |
-|   Memory Dedup | LLM语义去重，自动合并重复记忆 |
-|   Shell Completion | bash/zsh/fish Tab 补全 |
-|   Interactive Init | `deepspace init` — 6步向导，3分钟从零到运行 |
-|   Log Viewer | `deepspace logs -f` — 实时日志 + 彩色 + 分级过滤 |
-|   Docker Support | `docker run windriders/opendeepspace` — 一键启动 |
+|   Plugin Ecosystem | timer_tool (延迟/倒计时), webhook_tool (外部API调用), echo_tool (测试) |
+|   Auto-Tagging | LLM 自动为新记忆推荐标签，写入数据库 |
+|   Unified Search | `deepspace search` — 并行搜索记忆+知识图谱 |
+|   Dashboard Export | 一键下载 stats + executions 为 JSON |
+|   Model Failover | 多 provider 自动容错切换 + 健康检查恢复 |
+|   API Auth | Bearer token 保护 /solve 端点 |
+|   Analytics | 项目热力图、记忆类型分布、增长曲线 |
+|   D3.js Graph | Dashboard 力导向知识图谱可视化 |
+|   Timeline | 60天记忆+执行时间线 |
+|   WebSocket Live | Dashboard 实时更新 + 桌面通知推送 |
 
-## 核心理念
-
-传统的笔记和记忆工具是被动的——你必须手动录入、手动检索。DeepSpace 是主动的：
-
-- **观察** — 记录你的工作内容、决策、学习
-- **整理** — 将碎片化信息构建成结构化知识图谱
-- **学习** — 空闲时自动研究知识空白、跟踪前沿
-- **预判** — 在正确的时机推送你需要的答案
-
-## 架构
-
-```
-┌────────────────────────────────────────────┐
-│              DeepSpace Core                │
-│                                            │
-│  ┌──────────┐ ┌──────────┐ ┌────────────┐  │
-│  │ Memory    │ │Knowledge  │ │Autonomous  │  │
-│  │ Engine    │ │Graph      │ │Learner     │  │
-│  │ 四层记忆  │ │知识图谱   │ │自主学习器  │  │
-│  └─────┬────┘ └─────┬─────┘ └──────┬─────┘  │
-│        │            │              │        │
-│  ┌─────┴────────────┴──────────────┴─────┐  │
-│  │       Agent Orchestrator              │  │
-│  │    (Executive/Research/Memory/Graph   │  │
-│  │     Planning/Reflection/Proactive)    │  │
-│  └──────────────────┬───────────────────┘  │
-│                     │                      │
-│  ┌──────────────────┴───────────────────┐  │
-│  │       Proactive Service Layer        │  │
-│  │  上下文感知 → 预判需求 → 主动推送    │  │
-│  └──────────────────────────────────────┘  │
-└────────────────────────────────────────────┘
-```
-
-## 快速开始
-
-### 前置条件
-
-- Python 3.12+
-- Docker
-
-### 1. 克隆并安装
+### Quick Start
 
 ```bash
-# Option A: pip install
+# pip install
 git clone https://github.com/WindRiders/opendeepspace.git
 cd opendeepspace
-python3 -m venv .venv
-source .venv/bin/activate
 pip install -e ".[dev]"
+export DASHSCOPE_API_KEY="sk-..."
+deepspace init
 
-# Option B: Docker (one command)
-docker run -d --name deepspace \
-  -e DASHSCOPE_API_KEY="sk-xxx" \
-  -p 8645:8645 \
-  windriders/opendeepspace
+# or Docker
+docker run -d -e DASHSCOPE_API_KEY=sk-xxx -p 8645:8645 windriders/opendeepspace
+
+# try it
+deepspace remember "Hello DeepSpace"
+deepspace recall "Hello"
+deepspace solve "check system status"
+deepspace serve  # then open http://localhost:8645/dashboard
 ```
-
-### 2. 配置 API Key
-
-```bash
-export DASHSCOPE_API_KEY="sk-your-key-here"
-```
-
-DeepSpace 默认使用阿里云 DashScope（OpenAI 兼容 API）。如需使用其他提供商，编辑 `config/config.yaml` 中的 `llm.base_url` 和 `llm.models`。
-
-### 3. 启动服务
-
-```bash
-# 启动数据库 (Docker)
-docker compose up -d
-
-# 等待就绪后初始化
-deepspace setup
-```
-
-### 4. 开始使用
-
-```bash
-# 记忆
-deepspace remember "我正在开发一个使用 Prisma 的历史数据平台"
-
-# 检索
-deepspace recall "Prisma 查询优化"
-
-# 每日简报
-deepspace briefing
-
-# 预判需求
-deepspace predict
-
-# 知识图谱搜索
-deepspace graph "PostgreSQL"
-
-# 查看实体关联
-deepspace neighbors "TimeMap"
-
-# 元认知反思
-deepspace reflect
-
-# 后台持续运行
-deepspace orchestrate
-```
-
-## 四层记忆模型
-
-| 层级 | 说明 | 生命周期 |
-|------|------|---------|
-| **短期记忆** (short_term) | 当前会话上下文 | 分钟~天 |
-| **工作记忆** (working) | 项目相关上下文 | 天~周 |
-| **长期记忆** (long_term) | 永久知识 | 永久 |
-| **元记忆** (meta) | 关于记忆的记忆 | 永久 |
-
-## CLI 命令
-
-```
-remember    存储新记忆
-recall      混合检索（向量 + 关键词）
-show        查看记忆详情
-consolidate 记忆巩固（短期→长期）
-reflect     元认知分析
-stats       记忆统计
-
-graph       搜索知识图谱
-neighbors   查看实体关联
-
-learn       自主学习循环
-predict     预判用户需求
-push        触发主动推送
-briefing    生成每日简报
-
-orchestrate 启动完整编排器
-serve       启动 FastAPI + WebSocket
-schedule    注册 Hermes cronjob
-setup       初始化环境
-```
-
-## API
-
-启动服务器：
-
-```bash
-deepspace serve
-# → http://127.0.0.1:8645
-# → WebSocket: ws://127.0.0.1:8645/ws
-```
-
-核心端点：
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/remember` | POST | 存储记忆 |
-| `/recall` | POST | 检索记忆 |
-| `/stats` | GET | 统计信息 |
-| `/reflect` | GET | 元认知 |
-| `/graph/search?q=` | GET | 图谱搜索 |
-| `/proactive/context` | GET | 当前上下文 |
-| `/proactive/predict` | GET | 预判需求 |
-| `/ws` | WebSocket | 实时通信 |
-
-## 技术栈
-
-| 组件 | 技术 |
-|------|------|
-| 核心语言 | Python 3.12+ |
-| 向量存储 | PostgreSQL + pgvector |
-| 知识图谱 | Neo4j 5 Community |
-| LLM 后端 | DashScope / OpenAI 兼容 API |
-| API 服务 | FastAPI + WebSocket |
-| CLI | Click + Rich |
-
-## 项目结构
-
-```
-opendeepspace/
-├── core/                   # 核心引擎
-│   ├── models.py           # 数据模型
-│   ├── llm_client.py       # LLM 客户端
-│   ├── memory_engine.py    # 四层记忆引擎
-│   ├── autonomous_learner.py  # 自主学习器
-│   ├── proactive_service.py   # 主动服务
-│   └── orchestrator.py     # 多Agent编排
-├── storage/                # 存储层
-│   ├── pgvector_store.py   # PostgreSQL+pgvector
-│   └── neo4j_store.py      # Neo4j 图存储
-├── api/                    # API 服务
-│   └── server.py           # FastAPI + WebSocket
-├── integrations/           # 集成
-│   └── hermes_bridge.py    # Hermes Agent 集成
-├── cli/                    # CLI
-│   └── deepspace.py        # 18个子命令
-├── config/                 # 配置
-│   └── config.yaml
-├── scripts/                # 工具脚本
-│   ├── seed_import.py      # 慢速导入 (含LLM处理)
-│   └── fast_import.py      # 快速导入
-└── docker-compose.yml      # Docker 编排
-```
-
-## 开发
-
-```bash
-pip install -e ".[dev]"
-pytest
-```
-
-## 与 Hermes Agent 的关系
-
-DeepSpace 完全独立运行。唯一的交集是：
-
-- 可选：从 Hermes 配置文件读取 API key（当环境变量不可用时）
-- 可选：通过 `deepspace schedule` 注册 Hermes cronjob 实现定时自动化
-
-去掉这两点，DeepSpace 就是完全独立的系统。
-
-## License
-
-MIT

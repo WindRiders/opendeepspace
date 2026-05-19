@@ -1,67 +1,127 @@
 # Changelog
 
-All notable changes to DeepSpace will be documented in this file.
+## [0.8.1] - 2026-05-18
+
+### Fixed
+
+- Auto-tagging now persists to database after LLM suggestion (was only in-memory)
+- Version management: git tags, README badges, CHANGELOG all synchronized
+
+## [0.8.0] - 2026-05-18
+
+### Added
+
+- **Plugin ecosystem**: timer_tool (delay/countdown), webhook_tool (external API calls), echo_tool (testing)
+- **Auto-tagging**: LLM suggests 2-4 tags on `remember()` when no tags provided
+- **Unified search**: `deepspace search` — parallel recall + graph entity search
+- **Dashboard export**: one-click JSON download of stats + executions
+- **Docker image**: multi-stage build ready for `windriders/opendeepspace`
+- 30 CLI commands, 3 plugins
+
+## [0.7.3] - 2026-05-18
+
+### Fixed
+
+- Execution history persisted to PostgreSQL (survive restarts)
+- Plugin handlers injected into API Orchestrator instances via global singleton
+
+## [0.7.2] - 2026-05-18
+
+### Fixed
+
+- `_load_plugins()` async violation (nested asyncio.run in event loop)
+- `echo-tool` → `echo_tool` (Python module name cannot have hyphens)
+- `verify_auth` dead code — now applied to `POST /solve`
+- CLI `timeline` missing execution data (no orchestrator passed)
+- `plugins enable/disable` false success on missing plugin name
+
+## [0.7.1] - 2026-05-18
+
+### Fixed
+
+- Orchestrator `run_loop` now runs auto-solve every 2 hours
+- ModelRouter health checks started on server/orchestrator startup
+- Plugins auto-loaded on server/orchestrator startup
+
+## [0.7.0] - 2026-05-18
+
+### Added
+
+- **ModelRouter → LLMClient**: all chat() calls route through failover with automatic provider switching
+- **Plugins → AgentExecutor**: custom action types from plugins execute before built-in handlers
+- **API auth middleware**: optional Bearer token protection via `DEEP_SPACE_API_TOKEN`
+- **Analytics endpoint**: project heatmaps, memory type distribution, growth curves, importance stats
+- **Dashboard 6 tabs**: Overview, Memories, Graph(D3.js), Executions, Timeline, Analytics
+
+## [0.6.0] - 2026-05-18
+
+### Added
+
+- **Model Router**: multi-provider failover with health checks, failure tracking, round-robin
+- **Plugin Manager**: discovery, loading, lifecycle (load/enable/disable/unload), 5 extension points
+- **Timeline Generator**: chronological memory + execution views, project timelines, milestone detection
+- **Example plugin**: echo_tool with echo action type
+- CLI: `timeline`, `plugins`, `model-status` commands
+- API: `/timeline`, `/plugins`, `/model-status` endpoints
 
 ## [0.5.0] - 2026-05-18
 
 ### Added
 
-- **Desktop Notifications**: Cross-platform native OS notifications (macOS/Linux/Windows) with fallback to log file
-- **D3.js Graph Visualization**: Force-directed knowledge graph explorer in Web Dashboard
-- **WebSocket Live Dashboard**: Real-time connection indicator, auto-refresh on orchestrator events
-- **`--json` Output**: All CLI commands support `--json/-j` for machine-readable output
-- **Memory Deduplication**: `deepspace dedup` — LLM-based semantic similarity detection and auto-merge
-- **Notifier Integration**: Proactive push triggers desktop notifications automatically
+- **Desktop Notifications**: cross-platform (macOS/Linux/Windows) with fallback logging
+- **D3.js Graph Visualization**: force-directed knowledge graph in Web Dashboard
+- **WebSocket Live Dashboard**: real-time connection indicator, auto-refresh on orchestrator events
+- **`--json` output**: all CLI commands support machine-readable JSON output
+- **Memory Deduplication**: `deepspace dedup` with LLM semantic similarity detection
 
-### Changed
-
-- Dashboard completely redesigned with D3.js, WebSocket live updates, and graph visualization
-- Version bumped to 0.5.0
-- README revamped with feature table and updated description
-- 133 unit tests (up from 122)
+## [0.4.0] - 2026-05-18
 
 ### Added
 
-- **Web Dashboard**: Dark-themed SPA at `/dashboard` with Overview, Memories, Knowledge Graph, and Executions tabs
-- **Export/Import**: `deepspace export` (JSON/Markdown) and `deepspace import-memories` with dry-run support
-- **Log Viewer**: `deepspace logs --follow` with level filtering (DEBUG/INFO/WARNING/ERROR) and color-coded output
-- **Error Handling**: Standardized `ErrorCode` enum (25 codes), 6 custom exception classes, API error handlers
-- **Integration Tests**: 9 real-database tests requiring Docker (auto-skip in CI without Docker)
-- **Dashboard API**: Error middleware, HTML template serving
-
-### Changed
-
-- Version bumped to 0.4.0
-- CLI upgraded to 24 commands
-- Health endpoint enriched with features list
+- **Web Dashboard**: 4-tab SPA at `/dashboard`
+- **Export/Import**: `deepspace export` (JSON/Markdown) + `deepspace import-memories` with dry-run
+- **Log viewer**: `deepspace logs --follow` with level filtering and color output
+- **Error standards**: `ErrorCode` enum (25 codes), 6 custom exception classes, API error middleware
+- **Integration tests**: 9 real-database tests (auto-skip without Docker)
+- CLI: 26 commands, 122 unit tests
 
 ## [0.3.0] - 2026-05-18
 
 ### Added
 
-- **Agent Orchestrator**: Multi-agent coordination with 7 specialized agents (Executive, Research, Memory, Graph, Planning, Reflection, Proactive)
-- **Autonomous Learner**: Idle-time research with CPU monitoring, cost budgeting, and priority-based task scheduling
-- **Proactive Service**: Context-aware prediction and push notification system
-- **CLI**: 18 commands via Click + Rich — remember, recall, graph, learn, predict, orchestrate, etc.
-- **FastAPI Server**: REST API + WebSocket on port 8645
-- **Neo4j Integration**: Knowledge graph with entity extraction, relation inference, and graph search
-- **pgvector Storage**: Vector similarity search for hybrid memory retrieval
-- **Hermes Agent Integration**: Optional bridge for cronjob scheduling and config sharing
-- **Config**: YAML-based configuration with environment variable interpolation
-- **Docker Compose**: One-command setup for PostgreSQL+pgvector and Neo4j
+- **Interactive init wizard**: `deepspace init` with 6-step guided setup
+- **Docker support**: `Dockerfile` + `docker run` one-command start
+- **Shell completion**: bash/zsh/fish tab autocompletion
+- **`--version` flag**: version display + friendly welcome screen
+- README badges for CI status, coverage, license
 
-### Changed
+## [0.2.0] - 2026-05-18
 
-- Complete rewrite of memory engine with four-layer model
-- Migrated from Chroma-only to PostgreSQL+pgvector primary storage
+### Added
+
+- **Agent Orchestrator**: 7 specialized agents (Executive, Research, Memory, Graph, Planning, Reflection, Proactive)
+- **Autonomous Learner**: idle-time research with CPU monitoring, cost budgeting, priority scheduling
+- **Proactive Service**: context-aware prediction and push notifications
+- **CLI**: 18 commands via Click + Rich
+- **FastAPI Server**: REST + WebSocket on port 8645
+- **Neo4j + pgvector**: full knowledge graph + vector storage
+- **Docker Compose**: one-command database setup
 
 ## [0.1.0] - 2026-04
 
 ### Added
 
-- Initial prototype with Chroma vector storage
-- Basic memory recall and retrieval
-- Three-layer memory model (short-term, working, long-term)
+- Initial prototype: Chroma vector storage, basic memory recall, three-layer model
 
+[0.8.1]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.8.1
+[0.8.0]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.8.0
+[0.7.3]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.7.3
+[0.7.2]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.7.2
+[0.7.1]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.7.1
+[0.7.0]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.7.0
+[0.6.0]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.6.0
+[0.5.0]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.5.0
+[0.4.0]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.4.0
+[0.3.0]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.3.0
 [0.2.0]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.2.0
 [0.1.0]: https://github.com/WindRiders/opendeepspace/releases/tag/v0.1.0

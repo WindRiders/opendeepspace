@@ -554,7 +554,7 @@ async def api_dedup(threshold: float = 0.85, dry_run: bool = False):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.8.0", "agents": 9, "features": ["memory", "graph", "learn", "execute", "recover", "dashboard", "export", "dedup", "notify", "timeline", "plugins", "auth", "analytics"]}
+    return {"status": "ok", "version": "0.8.1", "agents": 9, "features": ["memory", "graph", "learn", "execute", "recover", "dashboard", "export", "dedup", "notify", "timeline", "plugins", "auth", "analytics"]}
 
 
 @app.get("/analytics")
