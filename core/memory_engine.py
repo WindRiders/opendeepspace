@@ -119,6 +119,24 @@ class MemoryEngine:
         # Save to store
         await self.vector_store.save_memory(memory)
 
+        # Auto-tagging via LLM (NEW)
+        if auto_embed and not tags and len(content) > 20:
+            try:
+                suggested_tags = await self.llm.chat_structured(
+                    messages=[{
+                        "role": "system",
+                        "content": "Suggest 2-4 concise tags for this content. Return as a JSON array.",
+                    }, {"role": "user", "content": content[:500]}],
+                    output_schema={
+                        "type": "object",
+                        "properties": {"tags": {"type": "array", "items": {"type": "string"}}},
+                    },
+                    model=self.llm.light_model,
+                )
+                memory.tags = suggested_tags.get("tags", [])[:5]
+            except Exception:
+                pass  # Non-critical
+
         # Extract entities for knowledge graph
         if auto_graph:
             await self._extract_and_store_graph(memory)

@@ -54,7 +54,7 @@
 <div class="container">
 <header>
 <div><h1>DeepSpace Dashboard</h1><span class="version"><span class="live-dot" id="live-dot" style="display:none"></span><span id="connection-status">offline</span> · v<span id="version">...</span></span></div>
-<div class="actions"><button onclick="refreshAll()">Refresh</button></div>
+<div class="actions"><button onclick="refreshAll()">Refresh</button><button onclick="exportData()" style="margin-left:8px">Export</button></div>
 </header>
 <div class="tabs">
 <button class="tab active" onclick="switchTab('overview')">Overview</button>
@@ -299,6 +299,25 @@ async function loadExecutions() {
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function refreshAll(){loadHealth();loadOverview()}
+
+async function exportData() {
+  try {
+    const r = await fetch('/stats');
+    const stats = await r.json();
+    const exec = await fetchJSON('/executions?limit=50').catch(() => ({executions:[]}));
+    const data = {
+      exported_at: new Date().toISOString(),
+      version: document.getElementById('version').textContent,
+      stats,
+      executions: exec.executions || [],
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `deepspace-export-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+  } catch(e) { alert('Export failed: ' + e.message); }
+}
 
 async function loadTimeline() {
   try {

@@ -27,7 +27,7 @@ from core.models import MemoryLayer, MemoryType
 from storage.pgvector_store import PgVectorStore, create_store
 from storage.neo4j_store import Neo4jGraphStore, create_graph_store
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 
 console = Console()
 logger = logging.getLogger("deepspace")
@@ -211,6 +211,45 @@ def recall(ctx, query, layer, project, top_k):
             )
 
         console.print(table)
+
+    asyncio.run(_run())
+
+
+@cli.command()
+@click.argument("query")
+@click.option("--top-k", "-k", default=10)
+@click.option("--project", "-p", default=None)
+@click.pass_context
+def search(ctx, query, top_k, project):
+    """Unified search across memories and knowledge graph."""
+    async def _run():
+        config = load_config(ctx.obj["config_path"])
+        engine = await init_engine(config)
+        json_out = ctx.obj.get("json_output")
+
+        mem_results, graph_results = await asyncio.gather(
+            engine.recall(query=query, project=project, top_k=top_k),
+            engine.graph_store.search_entities(query=query, top_k=top_k),
+            return_exceptions=True,
+        )
+        if isinstance(mem_results, Exception): mem_results = []
+        if isinstance(graph_results, Exception): graph_results = []
+
+        result = {"query": query, "memories": len(mem_results), "entities": len(graph_results),
+                  "memories_data": [{"id": m.id, "content": (m.summary or m.content)[:100]} for m in mem_results],
+                  "entities_data": [{"name": e.name, "type": e.entity_type.value} for e in graph_results]}
+
+        if json_out:
+            console.print_json(json.dumps(result, default=str))
+            return
+
+        console.print(f"\n[bold]Search:[/] {query} | [dim]{result['memories']}m, {result['entities']}e[/]")
+        if mem_results:
+            for i, m in enumerate(mem_results[:5]):
+                console.print(f"  [cyan]m{i+1}[/] {(m.summary or m.content)[:100]}")
+        if graph_results:
+            for i, e in enumerate(graph_results[:5]):
+                console.print(f"  [yellow]e{i+1}[/] {e.name} [{e.entity_type.value}]")
 
     asyncio.run(_run())
 
