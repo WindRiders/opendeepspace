@@ -65,8 +65,9 @@ class SolveRequest(BaseModel):
 class AppState:
     def __init__(self):
         self.engine: Optional[MemoryEngine] = None
-        self.proactive: Optional[ProactiveService] = None
+        self.orchestrator: Optional[Orchestrator] = None
         self.llm: Optional[LLMClient] = None
+        self.proactive: Optional[ProactiveService] = None
         self.ws_connections: list[WebSocket] = []  # Active WS clients
 
     async def broadcast(self, data: dict):
