@@ -134,6 +134,8 @@ class MemoryEngine:
                     model=self.llm.light_model,
                 )
                 memory.tags = suggested_tags.get("tags", [])[:5]
+                # Re-save to persist tags to DB
+                await self.vector_store.save_memory(memory)
             except Exception:
                 pass  # Non-critical
 
