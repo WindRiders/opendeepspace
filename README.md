@@ -46,3 +46,32 @@ deepspace recall "Hello"
 deepspace solve "check system status"
 deepspace serve  # then open http://localhost:8645/dashboard
 ```
+
+##   Screenshots
+
+<p align="center">
+  <em>Dashboard Overview — 记忆统计、知识空白、执行历史</em><br>
+  <img src="screenshots/dashboard-overview.png" width="80%" alt="Dashboard Overview">
+</p>
+
+<p align="center">
+  <em>D3.js Knowledge Graph — 力导向图可视化</em><br>
+  <img src="screenshots/dashboard-graph.png" width="80%" alt="Graph Visualization">
+</p>
+
+<p align="center">
+  <em>CLI Autonomous Execution — deepspace solve</em><br>
+  <img src="screenshots/cli-solve.png" width="80%" alt="CLI Solve">
+</p>
+
+<p align="center">
+  <em>Analytics — 项目热力图、类型分布、增长曲线</em><br>
+  <img src="screenshots/dashboard-analytics.png" width="80%" alt="Analytics">
+</p>
+
+<p align="center">
+  <em>Timeline — 60天记忆+执行历史</em><br>
+  <img src="screenshots/dashboard-timeline.png" width="80%" alt="Timeline">
+</p>
+
+##   Core Features
