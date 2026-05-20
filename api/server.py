@@ -176,7 +176,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="DeepSpace API",
     description="Autonomous Learning Memory System",
-    version="0.1.0",
+    version="0.8.1",
     lifespan=lifespan,
 )
 
