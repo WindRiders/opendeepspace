@@ -35,6 +35,7 @@ dependencies = [
     "click>=8.0",             # CLI framework
     "tiktoken>=0.7.0",        # Token counting
     "numpy>=1.26.0",          # Math
+    "psutil>=5.9.0",           # System monitoring (CPU idle detection)
 ]
 
 [project.optional-dependencies]
