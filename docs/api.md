@@ -267,6 +267,62 @@ POST /orchestrator/cycle
 }
 ```
 
+### 自主执行 (v0.3+)
+
+```
+POST /solve
+```
+
+请求：
+```json
+{"goal": "check system status", "context": "", "mode": "semi_auto"}
+```
+
+### 自主推导 (v0.4+)
+
+```
+POST /orchestrator/auto-solve
+GET  /goals
+```
+
+### 执行历史 (v0.4+)
+
+```
+GET /executions?limit=20
+```
+
+### 去重 (v0.5+)
+
+```
+POST /dedup?threshold=0.85&dry_run=false
+```
+
+### 时间线 (v0.6+)
+
+```
+GET /timeline?days=30&project=deepspace
+```
+
+### 数据分析 (v0.7+)
+
+```
+GET /analytics?days=60
+```
+
+返回项目热力图、记忆类型分布、重要性分布、增长曲线。
+
+### 插件 (v0.8+)
+
+```
+GET /plugins     # 插件列表和状态
+```
+
+### 模型状态 (v0.6+)
+
+```
+GET /model-status  # 模型路由器健康状态
+```
+
 ## WebSocket API
 
 连接：`ws://127.0.0.1:8645/ws`

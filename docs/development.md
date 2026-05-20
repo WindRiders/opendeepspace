@@ -41,6 +41,27 @@ opendeepspace/
 
 ## 添加新功能
 
+### 开发插件 (v0.8+)
+
+创建 `plugins/<name>/plugin.json` + `__init__.py`：
+
+```json
+{"name": "my_plugin", "version": "0.1.0", "provides": ["action:my_action"]}
+```
+
+```python
+from core.plugin_manager import Plugin
+class MyPlugin(Plugin):
+    def get_execution_handlers(self):
+        return {"my_action": self._handle}
+    async def _handle(self, step, executor):
+        from core.models import ActionResult, StepStatus
+        return ActionResult(step_id=step.id, step_number=step.step_number,
+                           status=StepStatus.COMPLETED, stdout="done", exit_code=0)
+```
+
+扩展点：`get_action_handlers`, `get_execution_handlers`, `get_cli_commands`, `get_api_routes`, `get_memory_hooks`
+
 ### 添加新的记忆类型
 
 编辑 `core/models.py` 中的 `MemoryType` 枚举：

@@ -142,7 +142,7 @@ Autonomous Learner 在系统空闲时自动学习和研究：
 
 ## Agent 编排器
 
-Orchestrator 协调 7 个专业 Agent：
+Orchestrator 协调 9 个专业 Agent：
 
 | Agent | 职责 |
 |-------|------|
@@ -151,8 +151,37 @@ Orchestrator 协调 7 个专业 Agent：
 | Memory | 管理记忆的存储和检索 |
 | Graph | 维护知识图谱的完整性 |
 | Planning | 任务分解和计划制定 |
+| Action | 安全执行计划步骤 |
+| Verification | 验证执行结果 + 自主恢复 |
 | Reflection | 元认知分析 |
 | Proactive | 上下文监控和主动推送 |
+
+## 模型路由器 (v0.6+)
+
+ModelRouter 提供多 provider 自动容错：
+
+```
+Primary (dashscope) → 失败 → Fallback (openai) → 失败 → 全部异常
+         ↑                          │
+         └── 健康检查恢复 ──────────┘
+```
+
+- 连续 3 次失败标记 unhealthy
+- 每 60s 健康检查自动恢复
+- 跟踪失败率用于路由决策
+
+## 插件系统 (v0.8+)
+
+PluginManager 支持动态扩展：
+
+```
+plugins/
+  echo_tool/     → action:echo
+  timer_tool/    → action:timer, countdown
+  webhook_tool/  → action:webhook
+```
+
+扩展点：action handlers, execution handlers, CLI commands, API routes, memory hooks。
 
 ## 主动服务
 
