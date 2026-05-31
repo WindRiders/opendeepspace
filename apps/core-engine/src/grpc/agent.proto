@@ -1,0 +1,259 @@
+syntax = "proto3";
+
+package deepspace;
+
+// ─── Agent Interaction ──────────────────────────────
+
+message InteractRequest {
+  string dna = 1;              // Agent personality / system prompt
+  string message = 2;          // User message
+  string session_id = 3;       // Session identifier
+  string user_id = 4;          // User identifier
+  string model_id = 5;         // Optional model selection
+  repeated string tool_names = 6; // Allowed tool names
+}
+
+message ToolCall {
+  string name = 1;
+  string args_json = 2;        // JSON-encoded arguments
+  string result = 3;           // Tool execution result
+  int32 step = 4;              // Which step in the loop
+}
+
+message InteractResponse {
+  string reply = 1;            // Final agent reply
+  repeated ToolCall tool_calls = 2;
+  int32 total_steps = 3;
+  string session_id = 4;
+}
+
+message InteractStreamChunk {
+  string type = 1;             // thinking, tool_call_start, tool_call_result, text_chunk, done, error
+  string content = 2;
+  string tool_name = 3;
+  string args_json = 4;
+  string result = 5;
+  int32 step = 6;
+  int32 total_steps = 7;
+  string session_id = 8;
+  int32 duration_ms = 9;
+  string code = 10;            // Error code
+  string message = 11;         // Error message
+}
+
+// ─── Memory ────────────────────────────────────────
+
+message Memory {
+  string id = 1;
+  string content = 2;
+  string summary = 3;
+  string layer = 4;            // SHORT_TERM, WORKING, LONG_TERM, META
+  string memory_type = 5;
+  double importance = 6;
+  double confidence = 7;
+  string project = 8;
+  repeated string tags = 9;
+  string source = 10;
+  int64 created_at = 11;       // Unix timestamp
+  int64 last_accessed = 12;
+  int32 access_count = 13;
+  int32 ttl_days = 14;
+  repeated string related_ids = 15;
+}
+
+message RememberRequest {
+  string content = 1;
+  string layer = 2;
+  string memory_type = 3;
+  string project = 4;
+  repeated string tags = 5;
+  string source = 6;
+}
+
+message RememberResponse {
+  string memory_id = 1;
+}
+
+message RecallRequest {
+  string query = 1;
+  string layer = 2;
+  string memory_type = 3;
+  string project = 4;
+  repeated string tags = 5;
+  int32 top_k = 6;
+  double min_importance = 7;
+}
+
+message RecallResponse {
+  repeated Memory memories = 1;
+}
+
+message ConsolidateRequest {
+  // Reserved for future parameters
+}
+
+message ConsolidateResponse {
+  int32 promoted_count = 1;
+  int32 cleaned_count = 2;
+}
+
+// ─── Orchestration ─────────────────────────────────
+
+message ActionStep {
+  int32 index = 1;
+  string description = 2;
+  string command = 3;
+  string action_type = 4;      // shell, python, file_write, git, api_call
+  string expected_outcome = 5;
+  repeated int32 dependencies = 6;
+}
+
+message SolveRequest {
+  string goal = 1;
+  string context = 2;
+  string mode = 3;             // plan_only, semi_auto, full_auto
+  string user_id = 4;
+}
+
+message SolveResponse {
+  string goal_id = 1;
+  string outcome = 2;          // success, partial_success, failed
+  int32 steps_total = 3;
+  int32 steps_passed = 4;
+  repeated ActionStep plan = 5;
+  string summary = 6;
+}
+
+message SolveStreamChunk {
+  string type = 1;             // plan, step_start, step_result, verify, recovery, done
+  string content = 2;
+  int32 step_index = 3;
+  string step_status = 4;      // in_progress, completed, failed
+  string agent_role = 5;       // Which agent is acting
+}
+
+// ─── Autonomous ────────────────────────────────────
+
+message AutonomousStatusRequest {}
+
+message LearningTask {
+  string id = 1;
+  string topic = 2;
+  double priority = 3;
+  string status = 4;           // pending, researching, analyzing, integrating, completed, failed
+}
+
+message AutonomousStatusResponse {
+  bool is_idle = 1;
+  repeated LearningTask pending_tasks = 2;
+  LearningTask active_task = 3;
+  double daily_cost = 4;
+  double daily_budget = 5;
+}
+
+message ProactiveContextRequest {}
+
+message ProactiveContextResponse {
+  string focus = 1;
+  repeated string topics = 2;
+  string activity_pattern = 3;
+  repeated Prediction predictions = 4;
+}
+
+message Prediction {
+  string topic = 1;
+  double priority = 2;
+  double relevance = 3;
+}
+
+// ─── Model Router ──────────────────────────────────
+
+message ModelStatusRequest {}
+
+message ProviderStatus {
+  string name = 1;
+  bool healthy = 2;
+  double failure_rate = 3;
+  int32 total_calls = 4;
+  int32 consecutive_failures = 5;
+}
+
+message ModelStatusResponse {
+  repeated ProviderStatus providers = 1;
+}
+
+// ─── Knowledge Graph ───────────────────────────────
+
+message GraphSearchRequest {
+  string query = 1;
+  string entity_type = 2;
+  int32 top_k = 3;
+}
+
+message Entity {
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  string description = 4;
+  double confidence = 5;
+}
+
+message GraphSearchResponse {
+  repeated Entity entities = 1;
+}
+
+message NeighborsRequest {
+  string entity_name = 1;
+  int32 depth = 2;
+}
+
+message NeighborRelation {
+  Entity entity = 1;
+  string relation_type = 2;
+  double confidence = 3;
+}
+
+message NeighborsResponse {
+  repeated NeighborRelation neighbors = 1;
+}
+
+// ─── Health ────────────────────────────────────────
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string version = 2;
+  int32 uptime_seconds = 3;
+}
+
+// ─── Service Definition ────────────────────────────
+
+service AgentEngine {
+  // Agent interaction
+  rpc Interact(InteractRequest) returns (InteractResponse);
+  rpc InteractStream(InteractRequest) returns (stream InteractStreamChunk);
+
+  // Memory
+  rpc Remember(RememberRequest) returns (RememberResponse);
+  rpc Recall(RecallRequest) returns (RecallResponse);
+  rpc Consolidate(ConsolidateRequest) returns (ConsolidateResponse);
+
+  // Orchestration
+  rpc Solve(SolveRequest) returns (SolveResponse);
+  rpc SolveStream(SolveRequest) returns (stream SolveStreamChunk);
+
+  // Autonomous
+  rpc GetAutonomousStatus(AutonomousStatusRequest) returns (AutonomousStatusResponse);
+  rpc GetProactiveContext(ProactiveContextRequest) returns (ProactiveContextResponse);
+
+  // Model Router
+  rpc GetModelStatus(ModelStatusRequest) returns (ModelStatusResponse);
+
+  // Knowledge Graph
+  rpc SearchGraph(GraphSearchRequest) returns (GraphSearchResponse);
+  rpc GetNeighbors(NeighborsRequest) returns (NeighborsResponse);
+
+  // Health
+  rpc Health(HealthRequest) returns (HealthResponse);
+}

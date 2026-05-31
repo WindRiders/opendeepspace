@@ -2,28 +2,53 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.2.x   | :white_check_mark: |
-| 0.1.x   | :x:                |
+| Version | Supported |
+|---------|-----------|
+| latest  | Yes       |
 
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability, please **do not** open a public issue.
 
-Instead, please email the maintainers directly. We will respond within 48 hours
-and work with you on a fix.
+Email the maintainers directly. We will respond within 48 hours.
 
-## Security Considerations
+## Security Architecture
 
-DeepSpace connects to LLM APIs (DashScope/OpenAI-compatible) and stores data
-locally. Key security practices:
+### Authentication
 
-1. **API Keys**: Never commit API keys. Use environment variables or the
-   `${VAR_NAME}` syntax in `config/config.yaml`.
-2. **Database Credentials**: Default credentials in `docker-compose.yml` are
-   for local development only. Change them in production.
-3. **Network**: The API server (`deepspace serve`) binds to `127.0.0.1` by
-   default. Do not expose it to the public internet without authentication.
-4. **Data**: All data is stored locally. DeepSpace does not send your data to
-   any external service beyond the configured LLM provider.
+- **JWT tokens** via Passport.js (`JwtAuthGuard`) for REST API
+- **WebSocket auth** via `WsJwtGuard` — JWT verification on handshake, falls back to anonymous with scoped data access
+- Passwords hashed with bcrypt
+
+### API Key Management
+
+- LLM API keys stored in `.env` file (never committed)
+- Template: `apps/core-engine/.env.example`
+- Keys: `DASHSCOPE_API_KEY`, `OPENAI_API_KEY`
+
+### Sandbox Isolation
+
+- All file operations restricted to `SANDBOX_ROOT` directory
+- Default: `~/deepspace-sandbox`
+- Path traversal attacks blocked via `path.resolve` normalization
+
+### SSRF Protection
+
+The `http_request` agent tool blocks requests to private/internal networks:
+- `localhost`, `127.0.0.1`, `0.0.0.0`
+- `192.168.0.0/16`, `10.0.0.0/8`, `172.16.0.0/12`
+- Non-HTTP protocols (`ftp://`, `file://`, etc.)
+- 15-second request timeout
+
+### Database
+
+- SQLite via `better-sqlite3` with WAL mode
+- Database files stored locally with file system permissions
+- User-scoped data access enforced at service layer (user ID matching)
+
+### Best Practices
+
+1. **Never commit `.env` files** — they are in `.gitignore`
+2. **Use HTTPS in production** — required for clipboard API and secure WebSocket
+3. **Bind to localhost** — default dev server binds to `localhost:3000`, not exposed to public
+4. **Rotate JWT secrets** periodically and use strong secrets in production

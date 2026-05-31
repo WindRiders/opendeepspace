@@ -90,6 +90,51 @@ class LLMClient:
             logger.error(f"Chat failed: {e}")
             raise
 
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        tools: Optional[list[dict]] = None,
+    ):
+        """Stream LLM chat response, yielding OpenAI-compatible chunks."""
+        model_name = model or self.primary_model
+        kwargs = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+        resp = await self.client.chat.completions.create(**kwargs)
+        async for chunk in resp:
+            yield chunk
+
+    async def chat_complete(
+        self,
+        messages: list[dict],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        tools: Optional[list[dict]] = None,
+    ):
+        """Complete LLM chat with optional tool calling. Returns full response object."""
+        model_name = model or self.primary_model
+        kwargs = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+        return await self.client.chat.completions.create(**kwargs)
+
     async def _chat_with_router(
         self, messages, model_name, temperature, max_tokens, response_format
     ) -> str:

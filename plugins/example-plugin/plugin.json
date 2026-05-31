@@ -1,0 +1,9 @@
+{
+  "id": "example-plugin",
+  "name": "Example Plugin",
+  "version": "1.0.0",
+  "description": "An example plugin with a custom echo tool",
+  "author": "DeepSpace",
+  "enabled": true,
+  "tools": ["echo"]
+}

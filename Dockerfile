@@ -19,10 +19,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 # Copy just the package metadata first for caching
 COPY pyproject.toml README.md ./
 
-# Install with no deps yet (just to get the package structure)
-RUN pip install --no-cache-dir -e . > /dev/null 2>&1 || true
-
-# Now copy source and install proper
+# Now copy source and install to site-packages (NOT editable — needed for runtime stage)
 COPY core/ ./core/
 COPY storage/ ./storage/
 COPY api/ ./api/
@@ -31,7 +28,7 @@ COPY integrations/ ./integrations/
 COPY config/ ./config/
 COPY scripts/ ./scripts/
 
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir .
 
 
 FROM python:3.12-slim
@@ -44,7 +41,6 @@ COPY --from=builder /usr/local/bin/deepspace /usr/local/bin/deepspace
 
 # Copy configs
 COPY config/ ./config/
-COPY docker-compose.yml ./docker-compose.yml
 COPY scripts/ ./scripts/
 
 # Create data directory
@@ -62,5 +58,5 @@ CMD ["python", "-m", "uvicorn", "api.server:app", "--host", "0.0.0.0", "--port",
 LABEL org.opencontainers.image.title="opendeepspace"
 LABEL org.opencontainers.image.description="DeepSpace — Autonomous Learning Memory System"
 LABEL org.opencontainers.image.source="https://github.com/WindRiders/opendeepspace"
-LABEL org.opencontainers.image.version="0.8.1"
+LABEL org.opencontainers.image.version="0.9.0"
 LABEL org.opencontainers.image.licenses="MIT"

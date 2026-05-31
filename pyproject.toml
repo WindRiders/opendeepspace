@@ -1,6 +1,6 @@
 [project]
 name = "opendeepspace"
-version = "0.8.1"
+version = "0.9.0"
 description = "DeepSpace — Autonomous Learning Memory System powered by LLM Agents"
 readme = "README.md"
 license = {text = "MIT"}
@@ -36,6 +36,8 @@ dependencies = [
     "tiktoken>=0.7.0",        # Token counting
     "numpy>=1.26.0",          # Math
     "psutil>=5.9.0",           # System monitoring (CPU idle detection)
+    "grpcio>=1.60.0",         # gRPC framework
+    "protobuf>=4.25.0",       # Protocol Buffers (proto generation)
 ]
 
 [project.optional-dependencies]

@@ -1,51 +1,70 @@
 # Contributing to DeepSpace
 
-## 开发环境
+DeepSpace is a TypeScript monorepo: NestJS backend + Next.js frontend + shared types.
+
+## Development Setup
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+# Prerequisites
+Node.js >= 20, pnpm >= 9
+
+# Install
+git clone https://github.com/WindRiders/DeepSpace.git
+cd DeepSpace
+pnpm install
+
+# Configure LLM API key
+cp apps/core-engine/.env.example apps/core-engine/.env
+# Edit .env — add DASHSCOPE_API_KEY or OPENAI_API_KEY
+
+# Start dev servers
+pnpm dev
 ```
 
-## 项目架构
+## Project Architecture
 
-阅读 `README.md` 了解整体架构。核心概念：
+| Layer | Path | Tech |
+|-------|------|------|
+| Backend | `apps/core-engine/` | NestJS 11, Express, better-sqlite3 |
+| Frontend | `apps/studio-web/` | Next.js 16, React 19, Tailwind CSS 4 |
+| Shared Types | `packages/shared-types/` | TypeScript interfaces |
+| Docs | `docs/` | Markdown |
 
-- **Memory Engine** (`core/memory_engine.py`) — 四层记忆模型
-- **Knowledge Graph** (`storage/neo4j_store.py`) — Neo4j 图存储
-- **Autonomous Learner** (`core/autonomous_learner.py`) — 空闲时自主学习
-- **Orchestrator** (`core/orchestrator.py`) — 多Agent协调
+Read `README.md` and `docs/architecture.md` for detailed architecture.
 
-## 添加新的记忆类型
+## Adding a New Module
 
-编辑 `core/models.py` 中的 `MemoryType` 枚举。
+1. **DTO**: Define request/response shapes in `src/<module>/dto/`
+2. **Service**: Business logic in `src/<module>/<module>.service.ts`
+3. **Controller**: Routes in `src/<module>/<module>.controller.ts`
+4. **Module**: Register in `src/<module>/<module>.module.ts` and import in `src/app.module.ts`
+5. **Tests**: Unit tests (`*.spec.ts`) + E2E tests (`test/<module>.e2e-spec.ts`)
 
-## 添加新的实体/关系类型
-
-编辑 `core/models.py` 中的 `EntityType` 和 `RelationType` 枚举。
-
-## 添加新的 Agent
-
-在 `core/orchestrator.py` 中：
-1. 添加 `AgentRole` 枚举值
-2. 实现 `_agent_xxx` 方法
-3. 在 `dispatch()` 中注册
-
-## 添加新的 CLI 命令
-
-在 `cli/deepspace.py` 中添加 `@cli.command()` 函数。
-
-## 运行测试
+## Running Tests
 
 ```bash
-pytest tests/ -v
+# Backend unit tests (356+ tests)
+pnpm --filter @deepspace/core-engine exec jest --forceExit
+
+# Backend E2E tests (141+ tests)
+pnpm --filter @deepspace/core-engine exec jest --config test/jest-e2e.json --forceExit
+
+# Frontend tests (242 tests)
+pnpm --filter @deepspace/studio-web exec vitest run
+
+# TypeScript check
+npx tsc --noEmit -p apps/core-engine/tsconfig.json
+npx tsc --noEmit -p apps/studio-web/tsconfig.json
 ```
 
-## 提交规范
+## Commit Convention
 
-- `feat:` 新功能
-- `fix:` 修复
-- `docs:` 文档
-- `refactor:` 重构
-- `chore:` 杂项
+Chinese commit messages with type prefix:
+
+- `feat:` new feature
+- `fix:` bug fix
+- `docs:` documentation
+- `refactor:` refactoring
+- `chore:` maintenance
+
+Examples: `feat: 添加 marketplace E2E 测试`, `fix: 修复 SSRF 172.x 范围判断`

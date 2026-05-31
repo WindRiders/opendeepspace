@@ -128,6 +128,8 @@ async def lifespan(app: FastAPI):
     from pathlib import Path
 
     config_path = Path.home() / "deepspace" / "config" / "config.yaml"
+    if not config_path.exists():
+        config_path = Path("/app/config/config.yaml")  # Docker path
     with open(config_path) as f:
         raw = f.read()
 
@@ -135,6 +137,18 @@ async def lifespan(app: FastAPI):
         return os.environ.get(match.group(1), "")
     raw = re.sub(r'\$\{(\w+)\}', expand_env, raw)
     config = yaml.safe_load(raw)
+
+    # Override storage config from env vars (Docker service names)
+    storage = config.setdefault("storage", {})
+    postgres = storage.setdefault("postgres", {})
+    for key, env in [("host", "PG_HOST"), ("port", "PG_PORT"), ("user", "PG_USER"),
+                      ("password", "PG_PASSWORD"), ("database", "PG_DATABASE")]:
+        if os.environ.get(env):
+            postgres[key] = os.environ[env] if key != "port" else int(os.environ[env])
+    neo4j_cfg = storage.setdefault("neo4j", {})
+    for key, env in [("uri", "NEO4J_URI"), ("user", "NEO4J_USER"), ("password", "NEO4J_PASSWORD")]:
+        if os.environ.get(env):
+            neo4j_cfg[key] = os.environ[env]
 
     # Fallback: Hermes config for API key
     if not config.get("llm", {}).get("api_key", "").startswith("sk-"):

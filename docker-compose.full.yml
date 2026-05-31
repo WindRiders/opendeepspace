@@ -1,0 +1,117 @@
+# DeepSpace — Docker Compose Full Stack
+#
+# Start everything:
+#   docker-compose -f docker-compose.yml -f docker-compose.full.yml up -d
+#
+# Or use the combined file:
+#   docker-compose up -d
+
+version: '3.8'
+
+services:
+  # ─── Databases (from docker-compose.yml) ──────────────
+
+  deepspace-pg:
+    image: pgvector/pgvector:pg16
+    container_name: deepspace-pg
+    environment:
+      POSTGRES_USER: deepspace
+      POSTGRES_PASSWORD: deepspace
+      POSTGRES_DB: deepspace
+    ports:
+      - "5440:5432"
+    volumes:
+      - deepspace_pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deepspace"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  deepspace-neo4j:
+    image: neo4j:5-community
+    container_name: deepspace-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/deepspace123
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - deepspace_neo4j_data:/data
+      - deepspace_neo4j_logs:/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "deepspace123", "RETURN 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ─── Python AI Engine ─────────────────────────────────
+
+  deepspace-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: deepspace-engine
+    environment:
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEEP_SPACE_API_TOKEN: ${DEEP_SPACE_API_TOKEN:-}
+      PG_HOST: deepspace-pg
+      PG_PORT: "5432"
+      PG_USER: deepspace
+      PG_PASSWORD: deepspace
+      PG_DATABASE: deepspace
+      NEO4J_URI: bolt://deepspace-neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: deepspace123
+    ports:
+      - "8645:8645"   # FastAPI
+      - "50051:50051"  # gRPC
+    depends_on:
+      deepspace-pg:
+        condition: service_healthy
+      deepspace-neo4j:
+        condition: service_healthy
+    restart: unless-stopped
+    command: ["/app/scripts/docker-entrypoint.sh"]
+
+  # ─── NestJS API Gateway ──────────────────────────────
+
+  deepspace-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: deepspace-gateway
+    environment:
+      NODE_ENV: production
+      GRPC_ENGINE_URL: deepspace-engine:50051
+      JWT_SECRET: ${JWT_SECRET:-deepspace-jwt-secret-change-me}
+      SANDBOX_ROOT: /app/sandbox
+    ports:
+      - "3001:3001"
+    depends_on:
+      - deepspace-engine
+    restart: unless-stopped
+
+  # ─── Next.js Frontend ────────────────────────────────
+
+  deepspace-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3001
+    container_name: deepspace-web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - deepspace-gateway
+    restart: unless-stopped
+
+volumes:
+  deepspace_pg_data:
+  deepspace_neo4j_data:
+  deepspace_neo4j_logs:

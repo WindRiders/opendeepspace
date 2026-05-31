@@ -1,0 +1,9 @@
+{
+  "name": "webhook_tool",
+  "version": "0.1.0",
+  "description": "Webhook plugin: call external webhooks with JSON payloads",
+  "author": "DeepSpace Contributors",
+  "license": "MIT",
+  "provides": ["action:webhook"],
+  "min_deepspace_version": "0.7.0"
+}

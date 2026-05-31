@@ -1,0 +1,9 @@
+{
+  "name": "echo_tool",
+  "version": "0.1.0",
+  "description": "Example plugin: adds echo action type for testing",
+  "author": "DeepSpace Contributors",
+  "license": "MIT",
+  "provides": ["action:echo", "cli:echo-test"],
+  "min_deepspace_version": "0.5.0"
+}

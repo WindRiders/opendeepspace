@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from enum import Enum
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from core.llm_client import LLMClient
 from core.memory_engine import MemoryEngine
@@ -79,7 +79,7 @@ class Orchestrator:
             AgentRole.MEMORY: self._agent_memory,
             AgentRole.GRAPH: self._agent_graph,
             AgentRole.PLANNING: self._agent_planning,
-            AgentRole.ACTION: self._agent_action,
+            AgentRole.ACTION: self.agent_action,
             AgentRole.VERIFICATION: self._agent_verification,
             AgentRole.REFLECTION: self._agent_reflection,
             AgentRole.PROACTIVE: self._agent_proactive,
@@ -198,7 +198,7 @@ class Orchestrator:
 
     # ── Action Agent (NEW) ─────────────────────
 
-    async def _agent_action(
+    async def agent_action(
         self, step: Optional[ActionStep] = None, step_dict: Optional[dict] = None,
         **kwargs
     ) -> dict:
@@ -339,12 +339,16 @@ class Orchestrator:
         description: str,
         context: str = "",
         mode: ExecutionMode = ExecutionMode.SEMI_AUTO,
+        on_progress: Callable[[dict], Awaitable[None]] | None = None,
     ) -> dict:
         """
         Full autonomous solve pipeline:
         Goal → Plan → Execute → Verify → Learn
 
         This is THE entry point for autonomous problem-solving.
+
+        If on_progress is provided, it's called with progress dicts:
+          {type, content, step_index, step_status, agent_role}
         """
         results = {
             "goal": description,
@@ -360,6 +364,8 @@ class Orchestrator:
         logger.info(f"SOLVE: Goal created — {description[:80]}")
 
         # Phase 2: Plan
+        if on_progress:
+            await on_progress({"type": "plan", "content": "Creating plan...", "agent_role": "planner"})
         plan_result = await self._agent_planning(goal_description=description)
         plan_data = plan_result.get("plan", {})
 
@@ -388,6 +394,9 @@ class Orchestrator:
             "estimated_total_minutes": execution_plan.estimated_total_minutes,
         }
 
+        if on_progress:
+            await on_progress({"type": "plan", "content": f"Plan created: {len(steps)} steps", "agent_role": "planner"})
+
         if mode == ExecutionMode.PLAN_ONLY:
             results["outcome"] = "planned_only"
             return results
@@ -405,10 +414,21 @@ class Orchestrator:
                 continue
 
             # Execute
-            action_result = await self._agent_action(step=step)
+            if on_progress:
+                await on_progress({"type": "step_start", "content": step.description,
+                                   "step_index": step.step_number, "step_status": "in_progress",
+                                   "agent_role": "action"})
+            action_result = await self.agent_action(step=step)
             exec_data = action_result.get("result", {})
+            if on_progress:
+                await on_progress({"type": "step_result", "content": str(exec_data.get("status", "executed")),
+                                   "step_index": step.step_number, "step_status": exec_data.get("status", "completed"),
+                                   "agent_role": "action"})
 
             # Verify
+            if on_progress:
+                await on_progress({"type": "verify", "content": f"Verifying step {step.step_number}...",
+                                   "step_index": step.step_number, "agent_role": "verification"})
             verify_result = await self._agent_verification(
                 step=step,
                 result=ActionResult(**exec_data) if exec_data else ActionResult(
@@ -420,11 +440,14 @@ class Orchestrator:
             verification = verify_result.get("verification", {})
             passed = verification.get("passed", False)
 
-            # ── Autonomous Recovery (NEW) ──
+            # ── Autonomous Recovery ──
             recovery_attempts = 0
             if not passed and mode in (ExecutionMode.SEMI_AUTO, ExecutionMode.FULL_AUTO):
                 while recovery_attempts < 2:
                     recovery_attempts += 1
+                    if on_progress:
+                        await on_progress({"type": "recovery", "content": f"Recovery attempt {recovery_attempts}/2",
+                                           "step_index": step.step_number, "agent_role": "recovery"})
                     logger.info(
                         f"RECOVERY: Step {step.step_number} failed — "
                         f"attempting autonomous recovery ({recovery_attempts}/2)"
@@ -447,7 +470,7 @@ class Orchestrator:
                         command=step.command,
                         expected_outcome=step.expected_outcome,
                     )
-                    retry_result = await self._agent_action(step=retry_step)
+                    retry_result = await self.agent_action(step=retry_step)
                     retry_data = retry_result.get("result", {})
 
                     # 4. Re-verify
@@ -537,6 +560,8 @@ class Orchestrator:
             f"SOLVE: Complete — {results['outcome']} "
             f"({success_count}/{total_count} steps passed)"
         )
+        if on_progress:
+            await on_progress({"type": "done", "content": f"Outcome: {results['outcome']} ({success_count}/{total_count} passed)"})
         return results
 
     async def _learn_from_execution(

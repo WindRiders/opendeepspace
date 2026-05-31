@@ -1,0 +1,9 @@
+{
+  "name": "timer_tool",
+  "version": "0.1.0",
+  "description": "Timer plugin: adds timed action execution with delay/countdown",
+  "author": "DeepSpace Contributors",
+  "license": "MIT",
+  "provides": ["action:timer", "action:countdown"],
+  "min_deepspace_version": "0.7.0"
+}

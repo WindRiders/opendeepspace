@@ -7,7 +7,9 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  # ─── Python Core Engine ──────────────────────────
+
+  python:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -15,21 +17,98 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Run tests (unit/mock only — no Docker needed)
+      - name: Run Python tests (unit/mock — no Docker needed)
         run: pytest tests/ -v --ignore=tests/integration --tb=short
 
-      - name: Check formatting
+      - name: Check Python formatting
         run: |
           pip install ruff
           ruff check core/ storage/ api/ cli/ --ignore=E501,F401,E402 || true
+
+  # ─── TypeScript Core Engine ──────────────────────
+
+  typescript-core:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared types
+        run: pnpm --filter @deepspace/shared-types build
+
+      - name: TypeScript check
+        run: npx tsc --noEmit -p apps/core-engine/tsconfig.json
+
+      - name: Run backend tests
+        run: pnpm --filter @deepspace/core-engine exec jest --forceExit
+
+  # ─── TypeScript Frontend ─────────────────────────
+
+  typescript-web:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared types
+        run: pnpm --filter @deepspace/shared-types build
+
+      - name: TypeScript check
+        run: npx tsc --noEmit -p apps/studio-web/tsconfig.json
+
+      - name: Run frontend tests
+        run: pnpm --filter @deepspace/studio-web exec vitest run
+
+  # ─── Build Check ─────────────────────────────────
+
+  build:
+    needs: [python, typescript-core, typescript-web]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all TypeScript packages
+        run: |
+          pnpm --filter @deepspace/shared-types build
+          pnpm --filter @deepspace/core-engine build
+          pnpm --filter @deepspace/studio-web build

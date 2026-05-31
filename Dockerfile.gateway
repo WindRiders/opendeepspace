@@ -1,0 +1,51 @@
+# DeepSpace — NestJS API Gateway Dockerfile
+# Multi-stage build for production
+
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@9 --activate
+
+# Copy monorepo config
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json turbo.json ./
+COPY packages/shared-types/package.json ./packages/shared-types/package.json
+COPY packages/shared-types/tsconfig.json ./packages/shared-types/tsconfig.json
+COPY apps/core-engine/package.json ./apps/core-engine/package.json
+COPY apps/core-engine/tsconfig.json ./apps/core-engine/tsconfig.json
+COPY apps/core-engine/tsconfig.build.json ./apps/core-engine/tsconfig.build.json
+COPY apps/core-engine/nest-cli.json ./apps/core-engine/nest-cli.json
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source
+COPY packages/shared-types/src ./packages/shared-types/src
+COPY apps/core-engine/src ./apps/core-engine/src
+COPY proto/agent.proto ./apps/core-engine/src/grpc/agent.proto
+
+# Build shared-types first, then core-engine
+RUN pnpm --filter @deepspace/shared-types build
+RUN pnpm --filter @deepspace/core-engine build
+
+# Prune dev deps
+RUN pnpm --filter @deepspace/core-engine --prod deploy /app/prod
+
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY --from=builder /app/prod/node_modules ./node_modules
+COPY --from=builder /app/prod/dist ./dist
+COPY --from=builder /app/apps/core-engine/src/grpc/agent.proto ./dist/grpc/agent.proto
+COPY --from=builder /app/packages/shared-types/dist ./packages/shared-types/dist
+
+RUN mkdir -p /app/sandbox
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD wget -q -O - http://localhost:3001/health || exit 1
+
+EXPOSE 3001
+
+CMD ["node", "dist/main.js"]

@@ -50,15 +50,6 @@ node_modules/
 # Turborepo
 .turbo/
 
-# Old TypeScript monorepo artifacts (not part of DeepSpace)
-apps/
-agents/
-plugins/
-packages/
-pnpm-lock.yaml
-pnpm-workspace.yaml
-turbo.json
-package.json
 
 # Distribution
 dist/
