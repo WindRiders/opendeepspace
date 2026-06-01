@@ -15,12 +15,12 @@ llm:
 storage:
   postgres:
     host: "localhost"
-    port: 5440
+    port: 5441
     database: "deepspace"
     user: "deepspace"
     password: "deepspace"
   neo4j:
-    uri: "bolt://localhost:7687"
+    uri: "bolt://localhost:7688"
     user: "neo4j"
     password: "deepspace123"
     database: "neo4j"
@@ -68,7 +68,7 @@ hermes:
 # API
 api:
   host: "127.0.0.1"
-  port: 8645
+  port: 8646
   cors_origins: ["*"]
 
 # Logging

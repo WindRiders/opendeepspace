@@ -1,4 +1,4 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3002";
 
 export const TOOL_DESCRIPTIONS: Record<string, string> = {
   read_file: "读取沙盒中的文件内容",

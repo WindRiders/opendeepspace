@@ -21,7 +21,7 @@ COPY packages/shared-types/src ./packages/shared-types/src
 COPY apps/studio-web/src ./apps/studio-web/src
 COPY apps/studio-web/public ./apps/studio-web/public
 
-ARG NEXT_PUBLIC_API_URL=http://localhost:3001
+ARG NEXT_PUBLIC_API_URL=http://localhost:3002
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 RUN pnpm --filter @deepspace/shared-types build
