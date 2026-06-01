@@ -8,7 +8,7 @@ llm:
   models:
     primary: "deepseek-v4-pro"
     vision: "qwen-vl-max-latest"
-    embedding: "text-embedding-v3"
+    embedding: "text-embedding-v2"
     light: "qwen-turbo-latest"
 
 # Storage

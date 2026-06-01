@@ -120,7 +120,7 @@ class AgentEngineServicer(agent_pb2_grpc.AgentEngineServicer):
                 reply = "Agent 已达到最大执行步数。"
 
             try:
-                self.engine.remember(
+                await self.engine.remember(
                     content=f"User: {message}\nAgent: {reply}",
                     layer=MemoryLayer.SHORT_TERM,
                     memory_type="conversation",
@@ -240,7 +240,7 @@ class AgentEngineServicer(agent_pb2_grpc.AgentEngineServicer):
 
     async def Remember(self, request, context):
         try:
-            memory = self.engine.remember(
+            memory = await self.engine.remember(
                 content=request.content,
                 layer=getattr(MemoryLayer, request.layer, MemoryLayer.SHORT_TERM) if request.layer else MemoryLayer.SHORT_TERM,
                 memory_type=request.memory_type or None,
@@ -257,7 +257,7 @@ class AgentEngineServicer(agent_pb2_grpc.AgentEngineServicer):
     async def Recall(self, request, context):
         try:
             layer = getattr(MemoryLayer, request.layer, None) if request.layer else None
-            memories = self.engine.recall(
+            memories = await self.engine.recall(
                 query=request.query,
                 layer=layer,
                 memory_type=request.memory_type or None,
@@ -287,7 +287,7 @@ class AgentEngineServicer(agent_pb2_grpc.AgentEngineServicer):
 
     async def Consolidate(self, request, context):
         try:
-            result = self.engine.consolidate()
+            result = await self.engine.consolidate()
             return agent_pb2.ConsolidateResponse(
                 promoted_count=getattr(result, 'promoted_count', 0),
                 cleaned_count=getattr(result, 'cleaned_count', 0),
@@ -450,14 +450,14 @@ class AgentEngineServicer(agent_pb2_grpc.AgentEngineServicer):
 
     async def GetModelStatus(self, request, context):
         try:
-            status = self.router.status()
+            status = self.router.status
             providers = []
-            for name, info in (status.get("providers", {}) or {}).items():
+            for p in (status.get("providers", []) or []):
                 providers.append(agent_pb2.ProviderStatus(
-                    name=name, healthy=info.get("healthy", False),
-                    failure_rate=info.get("failure_rate", 0.0) or 0.0,
-                    total_calls=info.get("total_calls", 0) or 0,
-                    consecutive_failures=info.get("consecutive_failures", 0) or 0,
+                    name=p.get("name", ""), healthy=p.get("healthy", False),
+                    failure_rate=p.get("failure_rate", 0.0) or 0.0,
+                    total_calls=p.get("total_calls", 0) or 0,
+                    consecutive_failures=p.get("consecutive_failures", 0) or 0,
                 ))
             return agent_pb2.ModelStatusResponse(providers=providers)
         except Exception as e:
@@ -469,11 +469,11 @@ class AgentEngineServicer(agent_pb2_grpc.AgentEngineServicer):
 
     async def SearchGraph(self, request, context):
         try:
-            entities = self.engine.graph_store.search_entities(
+            entities = await self.engine.graph_store.search_entities(
                 query=request.query,
                 entity_type=request.entity_type or None,
                 top_k=request.top_k or 10,
-            ) if hasattr(self.engine, 'graph_store') else []
+            ) if hasattr(self.engine, 'graph_store') and self.engine.graph_store is not None else []
             pb_entities = []
             for e in (entities or []):
                 pb_entities.append(agent_pb2.Entity(
@@ -491,9 +491,9 @@ class AgentEngineServicer(agent_pb2_grpc.AgentEngineServicer):
 
     async def GetNeighbors(self, request, context):
         try:
-            neighbors = self.engine.graph_store.get_neighbors(
+            neighbors = await self.engine.graph_store.get_neighbors(
                 entity_id=request.entity_name, depth=request.depth or 1,
-            ) if hasattr(self.engine, 'graph_store') else []
+            ) if hasattr(self.engine, 'graph_store') and self.engine.graph_store is not None else []
             pb_neighbors = []
             for entity, relation in (neighbors or []):
                 pb_neighbors.append(agent_pb2.NeighborRelation(
@@ -578,13 +578,13 @@ async def serve(config: Optional[dict] = None):
     graph_store = None
 
     try:
-        pg_store = create_pg_store(config)
+        pg_store = await create_pg_store(config)
         logger.info("PostgreSQL connected")
     except Exception as e:
         logger.warning(f"PostgreSQL unavailable: {e} — memory persistence disabled")
 
     try:
-        graph_store = create_neo4j_store(config)
+        graph_store = await create_neo4j_store(config)
         logger.info("Neo4j connected")
     except Exception as e:
         logger.warning(f"Neo4j unavailable: {e} — knowledge graph disabled")
