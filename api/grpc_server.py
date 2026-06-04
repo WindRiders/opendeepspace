@@ -243,8 +243,8 @@ class AgentEngineServicer(agent_pb2_grpc.AgentEngineServicer):
             memory = await self.engine.remember(
                 content=request.content,
                 layer=getattr(MemoryLayer, request.layer, MemoryLayer.SHORT_TERM) if request.layer else MemoryLayer.SHORT_TERM,
-                memory_type=request.memory_type or None,
-                project=request.project or None,
+                memory_type=request.memory_type or "",
+                project=request.project or "",
                 tags=list(request.tags) if request.tags else None,
                 source=request.source or "grpc",
             )

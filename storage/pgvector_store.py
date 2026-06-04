@@ -73,7 +73,7 @@ class PgVectorStore(RelationalStore, VectorStore):
                     project TEXT DEFAULT '',
                     tags JSONB DEFAULT '[]',
                     source TEXT DEFAULT '',
-                    embedding vector(1024),
+                    embedding vector(512),
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     last_accessed TIMESTAMPTZ DEFAULT NOW(),
                     access_count INTEGER DEFAULT 0,

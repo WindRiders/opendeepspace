@@ -51,6 +51,8 @@ class AutonomousLearner:
         })
         self.pending_tasks: list[LearningTask] = []
         self._running = False
+        self._daily_cost = 0.0
+        self._last_reset_date = datetime.now(timezone.utc).date()
 
     # ── Idle Detection ─────────────────────────
 
@@ -145,8 +147,15 @@ class AutonomousLearner:
     def _check_budget(self, task: LearningTask) -> bool:
         """Check if we have budget for this task."""
         daily_budget = self.learner_cfg.get("daily_cost_budget", 1.0)
-        # Simple check: allow if task cost estimate < daily budget
-        return task.cost_estimate < daily_budget
+        self._reset_daily_cost_if_needed()
+        estimated = task.cost_estimate or 0.01  # default estimate for LLM calls
+        return (self._daily_cost + estimated) < daily_budget
+
+    def _reset_daily_cost_if_needed(self) -> None:
+        today = datetime.now(timezone.utc).date()
+        if today != self._last_reset_date:
+            self._daily_cost = 0.0
+            self._last_reset_date = today
 
     # ── Task Execution ─────────────────────────
 
@@ -168,6 +177,8 @@ class AutonomousLearner:
             task.status = LearningTaskStatus.COMPLETED
             task.completed_at = now_utc()
             task.findings = findings
+            task.cost_estimate = 0.01  # approximate LLM API cost
+            self._daily_cost += task.cost_estimate
 
             # Remove from pending
             self.pending_tasks = [t for t in self.pending_tasks if t.id != task.id]
@@ -268,9 +279,12 @@ class AutonomousLearner:
 
     async def status(self) -> dict:
         """Get learner status."""
+        self._reset_daily_cost_if_needed()
         return {
             "running": self._running,
             "pending_tasks": len(self.pending_tasks),
+            "daily_cost": self._daily_cost,
+            "daily_budget": self.learner_cfg.get("daily_cost_budget", 1.0),
             "top_tasks": [
                 {"title": t.title, "priority": t.priority, "status": t.status.value}
                 for t in sorted(self.pending_tasks, key=lambda x: x.priority, reverse=True)[:5]

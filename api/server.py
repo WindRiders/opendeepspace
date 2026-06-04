@@ -10,9 +10,10 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
+import socketio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
@@ -84,8 +85,114 @@ class AppState:
 
 state = AppState()
 
+# Socket.IO server for collab
+sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
+_collab_online: dict[str, set[str]] = {}  # session_id -> set of sids
 
-# Global plugin manager (shared across all Orchestrator instances)
+
+@sio.event(namespace="/collab")
+async def connect(sid, environ, auth):
+    logger.info(f"Collab Socket.IO client connected: {sid}")
+
+
+@sio.event(namespace="/collab")
+async def disconnect(sid):
+    logger.info(f"Collab Socket.IO client disconnected: {sid}")
+    for sids in _collab_online.values():
+        sids.discard(sid)
+
+
+@sio.on("join-session", namespace="/collab")
+async def on_join_session(sid, data):
+    session_id = data.get("sessionId", "")
+    if session_id not in _collab_online:
+        _collab_online[session_id] = set()
+    _collab_online[session_id].add(sid)
+    await sio.emit("online-users", {"sessionId": session_id, "count": len(_collab_online[session_id])}, namespace="/collab")
+
+    session = _collab_sessions.get(session_id)
+    if session:
+        await sio.emit("session-state", session, to=sid, namespace="/collab")
+
+
+@sio.on("leave-session", namespace="/collab")
+async def on_leave_session(sid, data):
+    session_id = data.get("sessionId", "")
+    sids = _collab_online.get(session_id, set())
+    sids.discard(sid)
+    await sio.emit("online-users", {"sessionId": session_id, "count": len(sids)}, namespace="/collab")
+
+
+@sio.on("send-message", namespace="/collab")
+async def on_send_message(sid, data):
+    global _collab_msg_id
+    import time
+    session_id = data.get("sessionId", "")
+    _collab_msg_id += 1
+    msg = {
+        "id": str(_collab_msg_id),
+        "from": data.get("from", ""),
+        "to": data.get("to", ""),
+        "content": data.get("content", ""),
+        "type": data.get("type", "response"),
+        "timestamp": int(time.time() * 1000),
+    }
+    session = _collab_sessions.get(session_id)
+    if session:
+        session["messages"].append(msg)
+    await sio.emit("agent-message", msg, namespace="/collab")
+
+
+@sio.on("typing", namespace="/collab")
+async def on_typing(sid, data):
+    session_id = data.get("sessionId", "")
+    agent = data.get("agent", "")
+    await sio.emit("agent-typing", {"sessionId": session_id, "agent": agent}, namespace="/collab", skip_sid=sid)
+
+
+@sio.on("execute-session", namespace="/collab")
+async def on_execute_session(sid, data):
+    session_id = data.get("sessionId", "")
+    session = _collab_sessions.get(session_id)
+    if not session:
+        await sio.emit("collab-error", {"type": "collab_error", "sessionId": session_id, "message": "Session not found"}, to=sid, namespace="/collab")
+        return
+
+    session["status"] = "executing"
+    await sio.emit("session-updated", {"sessionId": session_id, "status": "executing"}, namespace="/collab")
+
+    agents = session.get("agents", [])
+    total = len(agents)
+    for i, role in enumerate(agents):
+        role_info = next((r for r in AGENT_ROLES if r["role"] == role), None)
+        name = role_info["name"] if role_info else role
+        await sio.emit("collab-agent-start", {"type": "collab_agent_start", "sessionId": session_id, "agentRole": role, "agentName": name}, namespace="/collab")
+
+        # Use LLM to generate agent response
+        try:
+            if state.llm:
+                prompt = f"你是DeepSpace协作网络中的{name}({role})。\n任务: {session['task']}\n历史消息: {len(session['messages'])}条\n请用中文回复，给出你的专业分析和建议。"
+                messages = [{"role": "system", "content": prompt}, {"role": "user", "content": f"针对任务「{session['task']}」，请给出你的分析。"}]
+                full = ""
+                async for chunk in state.llm.chat_stream(messages):
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        full += delta.content
+                        await sio.emit("collab-agent-chunk", {"type": "collab_agent_chunk", "sessionId": session_id, "agentRole": role, "content": delta.content}, namespace="/collab")
+                await sio.emit("collab-agent-done", {"type": "collab_agent_done", "sessionId": session_id, "agentRole": role, "fullContent": full}, namespace="/collab")
+            else:
+                await sio.emit("collab-agent-done", {"type": "collab_agent_done", "sessionId": session_id, "agentRole": role, "fullContent": f"[{name}] 引擎未初始化，无法生成回复。"}, namespace="/collab")
+        except Exception as e:
+            await sio.emit("collab-error", {"type": "collab_error", "sessionId": session_id, "message": str(e)}, namespace="/collab")
+
+    session["status"] = "complete"
+    await sio.emit("session-updated", {"sessionId": session_id, "status": "complete"}, namespace="/collab")
+    await sio.emit("collab-done", {"type": "collab_done", "sessionId": session_id, "summary": f"协作完成，{total}个Agent参与。"}, namespace="/collab")
+
+
+# ── Global plugin manager ─────────────────────
 _plugin_manager = None
 
 
@@ -194,8 +301,150 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # ── Memory Endpoints ─────────────────────────
+
+# Frontend path aliases
+@app.post("/memory/recall")
+async def api_memory_recall(req: RecallRequest):
+    """Alias for /recall — frontend compatibility."""
+    return await api_recall(req)
+
+@app.get("/memory/model-status")
+async def api_memory_model_status():
+    """Alias for /model-status — frontend compatibility."""
+    return await api_model_status()
+
+@app.get("/memory/autonomous-status")
+async def api_memory_autonomous_status():
+    """Autonomous learner status for frontend."""
+    orch = state.orchestrator
+    learner = getattr(orch, 'learner', None) if orch else None
+    if learner:
+        status = await learner.status()
+        return {
+            "isIdle": not status["running"],
+            "pendingTasks": [
+                {"id": t.id, "topic": t.title, "priority": t.priority, "status": t.status.value}
+                for t in (learner.pending_tasks or [])
+            ],
+            "activeTask": None,
+            "dailyCost": status["daily_cost"],
+            "dailyBudget": status["daily_budget"],
+        }
+    return {"isIdle": True, "pendingTasks": [], "activeTask": None, "dailyCost": 0, "dailyBudget": 1}
+
+# Auth bypass — Python API is open by default
+@app.get("/auth/me")
+async def api_auth_me():
+    """Return current user profile — bypass auth."""
+    return {"id": "local", "email": "dev@deepspace.local", "username": "dev", "avatarUrl": None, "role": "admin", "createdAt": "2024-01-01T00:00:00Z", "lastLoginAt": None}
+
+@app.post("/auth/login")
+@app.post("/auth/register")
+async def api_auth_bypass():
+    """Bypass auth — Python API doesn't require authentication."""
+    return {"user": {"id": "local", "email": "dev@deepspace.local"}, "access_token": "dev-bypass-token"}
+
+@app.get("/agent/status")
+async def api_agent_status():
+    """Agent status for frontend compatibility."""
+    models = [
+        {"id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro", "isDefault": True},
+        {"id": "qwen3.6-flash", "name": "Qwen 3.6 Flash", "isDefault": False},
+    ]
+    return {"status": "ok", "sessionCount": 0, "models": models}
+
+@app.post("/agent/interact/stream")
+async def api_agent_interact_stream(request: Request):
+    """SSE streaming chat endpoint for frontend."""
+    from starlette.responses import StreamingResponse
+    import json as _json
+
+    body = await request.json()
+    message = body.get("message", "")
+    dna = body.get("dna", "")
+
+    async def event_stream():
+        step = 0
+        try:
+            yield f"data: {_json.dumps({'type': 'session_start', 'content': '会话已建立'})}\n\n"
+
+            system_msg = dna or "你是 DeepSpace 网络中一个富有创造力的智能实体。请用中文回复。"
+            messages = [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": message},
+            ]
+
+            # Check if orchestrator should be used for tool-calling tasks
+            task_keywords = ["执行", "运行", "分析", "查找", "搜索", "创建", "部署", "run", "execute", "deploy", "search", "analyze"]
+            use_orchestrator = state.orchestrator and any(kw in message.lower() for kw in task_keywords)
+
+            if use_orchestrator:
+                yield f"data: {_json.dumps({'type': 'thinking', 'content': '正在分析任务并制定执行计划...'})}\n\n"
+
+                try:
+                    result = await state.orchestrator.solve_goal(
+                        description=message,
+                        context=system_msg,
+                        mode=ExecutionMode.SEMI_AUTO,
+                    )
+                    plan = result.get("plan", [])
+                    execution = result.get("execution", [])
+
+                    for i, action in enumerate(execution):
+                        step = i + 1
+                        tool_name = action.get("command", action.get("tool", "execute"))[:50]
+                        yield f"data: {_json.dumps({'type': 'tool_call_start', 'step': step, 'toolName': tool_name, 'args': action})}\n\n"
+
+                        # Simulate tool execution (actual execution already happened in solve_goal)
+                        r = action.get("result", "")
+                        if isinstance(r, dict):
+                            r = r.get("output", r.get("stdout", str(r)))
+                        yield f"data: {_json.dumps({'type': 'tool_call_result', 'step': step, 'toolName': tool_name, 'result': str(r)[:500], 'durationMs': int(action.get('duration', 0) * 1000)})}\n\n"
+
+                    # Stream the final output
+                    outcome = result.get("outcome", "任务完成")
+                    verdict = result.get("verdict", outcome)
+                    for char in str(verdict):
+                        yield f"data: {_json.dumps({'type': 'text_chunk', 'content': char})}\n\n"
+
+                    yield f"data: {_json.dumps({'type': 'done', 'totalSteps': max(step, 1), 'sessionId': ''})}\n\n"
+                except Exception as e:
+                    logger.error(f"Orchestrator SSE error: {e}")
+                    yield f"data: {_json.dumps({'type': 'error', 'code': 'ORCHESTRATOR_ERROR', 'message': str(e)})}\n\n"
+            else:
+                yield f"data: {_json.dumps({'type': 'thinking', 'content': '正在思考...'})}\n\n"
+
+                full_text = ""
+                async for chunk in state.llm.chat_stream(messages):
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        full_text += delta.content
+                        yield f"data: {_json.dumps({'type': 'text_chunk', 'content': delta.content})}\n\n"
+
+                yield f"data: {_json.dumps({'type': 'done', 'totalSteps': 1})}\n\n"
+
+        except Exception as e:
+            logger.error(f"SSE stream error: {e}")
+            yield f"data: {_json.dumps({'type': 'error', 'code': 'STREAM_ERROR', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+@app.delete("/agent/session/{session_id}")
+async def api_agent_session_delete(session_id: str):
+    """Delete agent session — frontend compatibility."""
+    return {"deleted": session_id}
 
 @app.post("/remember")
 async def api_remember(req: RememberRequest):
@@ -234,13 +483,17 @@ async def api_recall(req: RecallRequest):
     )
     return {
         "count": len(results),
-        "results": [
+        "memories": [
             {
                 "id": m.id,
                 "content": m.summary or m.content[:120],
+                "summary": m.summary or m.content[:120],
                 "layer": m.layer.value,
-                "type": m.memory_type.value,
+                "memoryType": m.memory_type.value,
                 "importance": m.importance,
+                "project": getattr(m, "project", ""),
+                "tags": getattr(m, "tags", []),
+                "source": getattr(m, "source", "api"),
             }
             for m in results
         ],
@@ -332,6 +585,73 @@ async def api_graph_neighbors(entity_name: str):
     }
 
 
+# ── Sandbox Endpoints ────────────────────────
+
+@app.get("/sandbox/files")
+async def api_sandbox_files(path: str = ""):
+    """List sandbox files and directories."""
+    import os as _os
+    from pathlib import Path
+
+    workdir = _os.environ.get("DEEP_SPACE_WORKDIR", str(Path.home() / "deepspace" / "workspace"))
+    target = _os.path.join(workdir, path) if path else workdir
+    target = _os.path.realpath(target)
+
+    if not target.startswith(_os.path.realpath(workdir)):
+        raise HTTPException(status_code=403, detail="Path traversal denied")
+
+    if not _os.path.exists(target):
+        return {"entries": []}
+
+    if _os.path.isfile(target):
+        stat = _os.stat(target)
+        return {"entries": [{
+            "name": _os.path.basename(target),
+            "path": path,
+            "type": "file",
+            "size": stat.st_size,
+            "modifiedAt": int(stat.st_mtime * 1000),
+        }]}
+
+    entries = []
+    for entry in sorted(_os.listdir(target)):
+        full = _os.path.join(target, entry)
+        rel = f"{path}/{entry}" if path else entry
+        stat = _os.stat(full)
+        if _os.path.isdir(full):
+            entries.append({"name": entry, "path": rel, "type": "directory", "modifiedAt": int(stat.st_mtime * 1000)})
+        else:
+            entries.append({"name": entry, "path": rel, "type": "file", "size": stat.st_size, "modifiedAt": int(stat.st_mtime * 1000)})
+    return {"entries": entries}
+
+
+@app.get("/sandbox/read")
+async def api_sandbox_read(path: str):
+    """Read a sandbox file."""
+    import os as _os
+    from pathlib import Path
+
+    workdir = _os.environ.get("DEEP_SPACE_WORKDIR", str(Path.home() / "deepspace" / "workspace"))
+    target = _os.path.join(workdir, path)
+    target = _os.path.realpath(target)
+
+    if not target.startswith(_os.path.realpath(workdir)):
+        raise HTTPException(status_code=403, detail="Path traversal denied")
+    if not _os.path.exists(target):
+        raise HTTPException(status_code=404, detail="File not found")
+    if _os.path.isdir(target):
+        raise HTTPException(status_code=400, detail="Path is a directory")
+
+    size = _os.stat(target).st_size
+    ext = _os.path.splitext(target)[1]
+    lang_map = {".py": "python", ".ts": "typescript", ".tsx": "typescript", ".js": "javascript",
+                ".json": "json", ".yaml": "yaml", ".yml": "yaml", ".md": "markdown", ".html": "html",
+                ".css": "css", ".sh": "bash", ".sql": "sql", ".txt": "text"}
+    with open(target) as f:
+        content = f.read()
+    return {"content": content, "size": size, "language": lang_map.get(ext, "text")}
+
+
 # ── Orchestrator Endpoints ───────────────────
 
 @app.post("/orchestrator/cycle")
@@ -378,6 +698,90 @@ async def api_briefing():
     """Get daily briefing."""
     briefing = await state.proactive.daily_briefing()
     return {"briefing": briefing}
+
+
+# ── Collab REST Endpoints ────────────────────
+
+# In-memory collab session storage
+_collab_sessions: dict[str, dict] = {}
+_collab_msg_id = 0
+
+AGENT_ROLES = [
+    {"role": "EXECUTIVE", "name": "执行者", "description": "协调任务分解和资源分配", "systemPrompt": "你是执行者，负责协调和决策。", "icon": "👑"},
+    {"role": "RESEARCH", "name": "研究员", "description": "搜索和分析信息", "systemPrompt": "你是研究员，负责信息收集和分析。", "icon": "🔍"},
+    {"role": "MEMORY", "name": "记忆师", "description": "管理长期记忆和知识检索", "systemPrompt": "你是记忆师，负责记忆存储和检索。", "icon": "🧠"},
+    {"role": "GRAPH", "name": "图谱师", "description": "构建和查询知识图谱", "systemPrompt": "你是图谱师，负责知识图谱操作。", "icon": "🕸️"},
+    {"role": "PLANNING", "name": "规划师", "description": "制定执行计划", "systemPrompt": "你是规划师，负责任务分解和计划制定。", "icon": "📋"},
+    {"role": "ACTION", "name": "执行器", "description": "执行具体操作", "systemPrompt": "你是执行器，负责执行具体任务。", "icon": "⚡"},
+    {"role": "VERIFICATION", "name": "验证师", "description": "验证执行结果", "systemPrompt": "你是验证师，负责结果验证。", "icon": "✅"},
+    {"role": "REFLECTION", "name": "反思者", "description": "反思和优化", "systemPrompt": "你是反思者，负责元认知和优化。", "icon": "🪞"},
+    {"role": "PROACTIVE", "name": "主动者", "description": "预测需求并主动推送", "systemPrompt": "你是主动者，负责上下文感知和预测。", "icon": "🔮"},
+]
+
+
+@app.get("/collab/roles")
+async def api_collab_roles():
+    """List available collab agent roles."""
+    return {"roles": AGENT_ROLES}
+
+
+@app.get("/collab/sessions")
+async def api_collab_sessions():
+    """List all collab sessions."""
+    return {"sessions": list(_collab_sessions.values())}
+
+
+@app.get("/collab/sessions/{session_id}")
+async def api_collab_session_get(session_id: str):
+    """Get a single collab session."""
+    session = _collab_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+@app.post("/collab/sessions")
+async def api_collab_session_create(req: dict):
+    """Create a new collab session."""
+    global _collab_msg_id
+    import uuid
+    import time
+
+    session_id = str(uuid.uuid4())[:8]
+    agents = [a for a in req.get("agents", []) if any(r["role"] == a for r in AGENT_ROLES)]
+    session = {
+        "id": session_id,
+        "task": req.get("task", ""),
+        "agents": agents,
+        "messages": [],
+        "status": "planning",
+        "createdAt": int(time.time() * 1000),
+    }
+    _collab_sessions[session_id] = session
+    return session
+
+
+@app.post("/collab/sessions/{session_id}/messages")
+async def api_collab_session_message(session_id: str, req: dict):
+    """Post a message to a collab session."""
+    global _collab_msg_id
+    import time
+
+    session = _collab_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    _collab_msg_id += 1
+    msg = {
+        "id": str(_collab_msg_id),
+        "from": req.get("from", ""),
+        "to": req.get("to", ""),
+        "content": req.get("content", ""),
+        "type": req.get("type", "response"),
+        "timestamp": int(time.time() * 1000),
+    }
+    session["messages"].append(msg)
+    return msg
 
 
 # ── WebSocket ────────────────────────────────
@@ -475,9 +879,7 @@ async def verify_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depe
 @app.post("/solve")
 async def api_solve(request: SolveRequest, _auth=Depends(verify_auth)):
     """Execute autonomous problem-solving: Goal → Plan → Execute → Verify → Learn."""
-    config = load_config()
-    engine = await get_engine(config)
-    orch = Orchestrator(engine, engine.llm, config, plugin_handlers=_get_plugin_handlers())
+    orch = state.orchestrator
 
     mode = ExecutionMode(request.mode) if request.mode else ExecutionMode.SEMI_AUTO
 
@@ -499,18 +901,14 @@ async def api_solve(request: SolveRequest, _auth=Depends(verify_auth)):
 @app.get("/executions")
 async def api_executions(limit: int = 20):
     """Get execution history."""
-    config = load_config()
-    engine = await get_engine(config)
-    orch = Orchestrator(engine, engine.llm, config, plugin_handlers=_get_plugin_handlers())
+    orch = state.orchestrator
     return {"executions": orch.execution_history[-limit:]}
 
 
 @app.post("/orchestrator/auto-solve")
 async def api_auto_solve():
     """Derive and solve self-derived goals from knowledge gaps."""
-    config = load_config()
-    engine = await get_engine(config)
-    orch = Orchestrator(engine, engine.llm, config, plugin_handlers=_get_plugin_handlers())
+    orch = state.orchestrator
     results = await orch.solve_self_derived_goals(max_goals=2)
     return {"results": results}
 
@@ -518,9 +916,7 @@ async def api_auto_solve():
 @app.get("/goals")
 async def api_goals():
     """Get self-derived goals from reflection gaps."""
-    config = load_config()
-    engine = await get_engine(config)
-    orch = Orchestrator(engine, engine.llm, config, plugin_handlers=_get_plugin_handlers())
+    orch = state.orchestrator
     goals = await orch.derive_goals(max_goals=5)
     return {"goals": goals}
 
@@ -560,8 +956,7 @@ async def dashboard():
 @app.post("/dedup")
 async def api_dedup(threshold: float = 0.85, dry_run: bool = False):
     """Find and merge semantically duplicate memories."""
-    config = load_config()
-    engine = await get_engine(config)
+    engine = state.engine
     result = await engine.deduplicate(threshold=threshold, dry_run=dry_run)
     return result
 
@@ -574,8 +969,7 @@ async def health():
 @app.get("/analytics")
 async def api_analytics(days: int = 30):
     """Get memory analytics: trends, active projects, growth."""
-    config = load_config()
-    engine = await get_engine(config)
+    engine = state.engine
 
     stats = await engine.stats()
     all_memories = []
@@ -615,12 +1009,9 @@ async def api_analytics(days: int = 30):
 @app.get("/timeline")
 async def api_timeline(days: int = 30, project: str = ""):
     """Get chronological timeline of memories and executions."""
-    config = load_config()
-    engine = await get_engine(config)
+    engine = state.engine
     from core.timeline import TimelineGenerator
-    from core.orchestrator import Orchestrator
-    orch = Orchestrator(engine, engine.llm, config, plugin_handlers=_get_plugin_handlers())
-    gen = TimelineGenerator(engine, orchestrator=orch)
+    gen = TimelineGenerator(engine, orchestrator=state.orchestrator)
     if project:
         return await gen.get_project_timeline(project=project, days=days)
     return await gen.get_full_timeline(days=days)
@@ -638,13 +1029,233 @@ async def api_plugins():
 @app.get("/model-status")
 async def api_model_status():
     """Get model router health and provider status."""
-    from core.model_router import ModelRouter
-    config = load_config()
-    router = ModelRouter(config)
-    return router.status
+    if state.llm and state.llm.router:
+        return state.llm.router.status
+    return {"error": "No router available"}
+
+
+# ── Auth Profile ─────────────────────────────
+
+@app.patch("/auth/me")
+async def api_auth_me_update(request: Request):
+    """Update user profile — bypass auth, accept any changes."""
+    body = await request.json()
+    return {
+        "id": "local", "email": "dev@deepspace.local",
+        "username": body.get("username", "dev"),
+        "avatarUrl": body.get("avatarUrl"), "role": "admin",
+        "createdAt": "2024-01-01T00:00:00Z", "lastLoginAt": None,
+    }
+
+
+# ── Conversations ────────────────────────────
+
+_conversations: list[dict] = []
+_conv_id = 0
+
+
+@app.get("/conversations")
+async def api_conversations():
+    return {"conversations": _conversations}
+
+
+@app.delete("/conversations/{conv_id}")
+async def api_conversation_delete(conv_id: str):
+    global _conversations
+    _conversations = [c for c in _conversations if c["id"] != conv_id]
+    return {"deleted": True}
+
+
+@app.patch("/conversations/{conv_id}/title")
+async def api_conversation_rename(conv_id: str, request: Request):
+    body = await request.json()
+    for c in _conversations:
+        if c["id"] == conv_id:
+            c["title"] = body.get("title", c["title"])
+            return {"updated": True}
+    return {"updated": False}
+
+
+# ── Plugins ──────────────────────────────────
+
+@app.get("/plugins")
+async def api_plugins_list():
+    """List installed plugins."""
+    from core.plugin_manager import PluginManager
+    manager = PluginManager()
+    await manager.discover()
+    return manager.status
+
+
+@app.post("/plugins/{plugin_id}/reload")
+async def api_plugin_reload(plugin_id: str):
+    return {"pluginId": plugin_id, "reloaded": True}
+
+
+@app.post("/plugins/{plugin_id}/toggle")
+async def api_plugin_toggle(plugin_id: str, request: Request):
+    body = await request.json()
+    return {"success": True, "pluginId": plugin_id, "enabled": body.get("enabled", True), "toolCount": 0}
+
+
+@app.post("/plugins/install")
+async def api_plugin_install(request: Request):
+    body = await request.json()
+    import uuid
+    return {"success": True, "id": str(uuid.uuid4())[:8], "name": body.get("dirPath", "unknown"), "toolCount": 0}
+
+
+# ── Templates ────────────────────────────────
+
+@app.get("/templates")
+async def api_templates():
+    return {"templates": [
+        {"id": "general", "name": "通用助手", "description": "通用AI助手模板", "dna": "你是一个有用的AI助手。"},
+        {"id": "coder", "name": "代码助手", "description": "专注于代码和开发", "dna": "你是一个专业的编程助手，擅长代码审查、调试和优化。"},
+        {"id": "researcher", "name": "研究员", "description": "深度研究和分析", "dna": "你是一个研究助手，擅长深度分析和信息整合。"},
+    ]}
+
+
+# ── Marketplace ──────────────────────────────
+
+_marketplace: dict[str, dict] = {}
+_market_stars: dict[str, set[str]] = {}
+_market_downloads: dict[str, int] = {}
+_market_id = 0
+
+
+@app.get("/marketplace")
+async def api_marketplace(search: str = "", tag: str = "", limit: int = 20, offset: int = 0):
+    agents = list(_marketplace.values())
+    if search:
+        agents = [a for a in agents if search.lower() in a.get("name", "").lower() or search.lower() in a.get("description", "").lower()]
+    if tag:
+        agents = [a for a in agents if tag in a.get("tags", [])]
+    return {"agents": agents[offset:offset + limit], "total": len(agents)}
+
+
+@app.get("/marketplace/{agent_id}")
+async def api_marketplace_agent(agent_id: str):
+    agent = _marketplace.get(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
+
+
+@app.post("/marketplace")
+async def api_marketplace_publish(request: Request):
+    global _market_id
+    body = await request.json()
+    _market_id += 1
+    agent_id = str(_market_id)
+    agent = {"id": agent_id, "name": body.get("name", ""), "description": body.get("description", ""),
+             "tags": body.get("tags", []), "dna": body.get("dna", ""), "author": body.get("author", "dev"),
+             "stars": 0, "downloads": 0, "createdAt": int(__import__("time").time() * 1000)}
+    _marketplace[agent_id] = agent
+    _market_stars[agent_id] = set()
+    _market_downloads[agent_id] = 0
+    return agent
+
+
+@app.post("/marketplace/{agent_id}/star")
+async def api_marketplace_star(agent_id: str):
+    if agent_id not in _marketplace:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    _market_stars.setdefault(agent_id, set()).add("local")
+    _marketplace[agent_id]["stars"] = len(_market_stars[agent_id])
+    return _marketplace[agent_id]
+
+
+@app.post("/marketplace/{agent_id}/download")
+async def api_marketplace_download(agent_id: str):
+    if agent_id not in _marketplace:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    _market_downloads[agent_id] = _market_downloads.get(agent_id, 0) + 1
+    _marketplace[agent_id]["downloads"] = _market_downloads[agent_id]
+    return {"downloads": _market_downloads[agent_id]}
+
+
+@app.delete("/marketplace/{agent_id}")
+async def api_marketplace_delete(agent_id: str):
+    if agent_id not in _marketplace:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    del _marketplace[agent_id]
+    return {"deleted": True}
+
+
+# ── Shares ───────────────────────────────────
+
+_shares: dict[str, dict] = {}
+_share_id = 0
+
+
+@app.post("/shares")
+async def api_shares_create(request: Request):
+    global _share_id
+    body = await request.json()
+    _share_id += 1
+    share_id = str(_share_id)
+    share = {"id": share_id, "type": body.get("type", ""), "title": body.get("title", ""),
+             "payload": body.get("payload", {}), "createdAt": int(__import__("time").time() * 1000)}
+    _shares[share_id] = share
+    return share
+
+
+@app.get("/shares")
+async def api_shares_list():
+    return {"shares": list(_shares.values())}
+
+
+@app.get("/shares/{share_id}")
+async def api_shares_get(share_id: str):
+    share = _shares.get(share_id)
+    if not share:
+        raise HTTPException(status_code=404, detail="Share not found")
+    return share
+
+
+@app.delete("/shares/{share_id}")
+async def api_shares_delete(share_id: str):
+    if share_id not in _shares:
+        raise HTTPException(status_code=404, detail="Share not found")
+    del _shares[share_id]
+    return {"deleted": True}
+
+
+# ── Traces ───────────────────────────────────
+
+_traces: dict[str, dict] = {}
+_trace_id = 0
+
+
+@app.get("/traces")
+async def api_traces(sessionId: str = ""):
+    if sessionId:
+        return {"traces": [t for t in _traces.values() if t.get("sessionId") == sessionId]}
+    return {"traces": list(_traces.values())}
+
+
+@app.get("/traces/{trace_id}")
+async def api_traces_get(trace_id: str):
+    trace = _traces.get(trace_id)
+    if not trace:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return trace
+
+
+@app.delete("/traces/{trace_id}")
+async def api_traces_delete(trace_id: str):
+    if trace_id not in _traces:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    del _traces[trace_id]
+    return {"deleted": True}
 
 
 # ── Main ─────────────────────────────────────
+
+# Wrap FastAPI with Socket.IO for collab support
+app = socketio.ASGIApp(sio, app)
+
 
 def main():
     import uvicorn

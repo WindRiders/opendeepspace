@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 class LLMClient:
     """Async LLM wrapper with optional ModelRouter failover."""
 
+    _local_embedder = None
+
     def __init__(self, config: dict, router=None):
         from core.model_router import ModelRouter
 
@@ -35,9 +37,24 @@ class LLMClient:
         self.light_model = models.get("light", "qwen-turbo-latest")
         self.embedding_model = models.get("embedding", "text-embedding-v3")
 
-    # ── Embedding (direct, no failover needed) ──
+        # Local embedding fallback
+        emb_cfg = config.get("embedding", {})
+        self._use_local_embed = emb_cfg.get("provider") == "local"
+        self._local_model_name = emb_cfg.get("local_model", "BAAI/bge-small-zh-v1.5")
+
+    def _get_local_embedder(self):
+        if LLMClient._local_embedder is None:
+            from sentence_transformers import SentenceTransformer
+            logger.info("Loading local embedding model: %s", self._local_model_name)
+            LLMClient._local_embedder = SentenceTransformer(self._local_model_name)
+        return LLMClient._local_embedder
+
+    # ── Embedding ──
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
+        if self._use_local_embed:
+            return self._embed_local(texts)
+
         try:
             resp = await self.client.embeddings.create(
                 model=self.embedding_model,
@@ -45,8 +62,13 @@ class LLMClient:
             )
             return [d.embedding for d in resp.data]
         except Exception as e:
-            logger.error(f"Embedding failed: {e}")
-            raise
+            logger.warning("API embedding failed (%s), falling back to local", e)
+            return self._embed_local(texts)
+
+    def _embed_local(self, texts: list[str]) -> list[list[float]]:
+        model = self._get_local_embedder()
+        embeddings = model.encode(texts, normalize_embeddings=True)
+        return embeddings.tolist()
 
     async def embed_single(self, text: str) -> list[float]:
         embeddings = await self.embed([text])

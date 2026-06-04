@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12"]
+        python-version: ["3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
       - name: Check Python formatting
         run: |
           pip install ruff
-          ruff check core/ storage/ api/ cli/ --ignore=E501,F401,E402 || true
+          ruff check core/ storage/ api/ cli/ tests/ --ignore=E501,E401,E701,E702,E741,F401,F541,F821,F841 --exclude=agent_pb2.py,agent_pb2_grpc.py
 
   # ─── TypeScript Core Engine ──────────────────────
 

@@ -25,20 +25,38 @@ logger = logging.getLogger(__name__)
 # ── Safety: Dangerous command patterns ──────
 
 DANGEROUS_PATTERNS = [
-    r"\brm\s+-rf\s+/",           # rm -rf /
-    r"\brm\s+-rf\s+~",           # rm -rf ~
-    r"\brm\s+-rf\s+\$HOME",      # rm -rf $HOME
-    r"\bdd\s+if=",               # dd (disk destroyer)
-    r">\s*/dev/sd",              # Overwrite block device
-    r"\bmkfs\.",                 # Format filesystem
-    r":\(\)\s*\{\s*:",           # Fork bomb
-    r"\bchmod\s+-R\s+777\s+/",   # chmod -R 777 /
-    r"\bwget.*\|.*sh",           # curl/wget piped to shell
-    r"\bcurl.*\|.*sh",           # curl piped to shell
-    r"\bgit\s+push\s+--force.*origin\s+main",  # force push main
+    # Destructive filesystem
+    r"\brm\s+-rf\s+/",              # rm -rf /
+    r"\brm\s+-rf\s+/\*",            # rm -rf /*
+    r"\brm\s+-rf\s+~",              # rm -rf ~
+    r"\brm\s+-rf\s+\$HOME",         # rm -rf $HOME
+    r"\bdd\s+if=",                  # dd (disk destroyer)
+    r">\s*/dev/sd",                 # Overwrite block device
+    r">\s*/dev/nvme",               # Overwrite NVMe device
+    r">\s*/dev/xvd",                # Overwrite Xen virtual disk
+    r">\s*/dev/disk",               # Overwrite macOS disk
+    r"\bmkfs\b",                    # Format filesystem (any variant)
+    # Privilege escalation / system takeover
+    r"\bchmod\s+(-R\s+)?[0-7]*7[0-7]*\s+/",   # chmod world-writable on /
+    r"\bchown\s+-R\s+\w+\s+/(usr|etc|var|opt|bin|sbin|root)\b",  # chown system dirs
+    r"\bsudo\b",                    # sudo
+    r"\bsu\s+-",                    # su
+    # Fork bombs
+    r":\(\)\s*\{\s*:\s*\|",        # :(){ :|... } fork bomb
+    r":\(\)\s*\{\s*:\s*;\s*\}\s*:",  # :(){ :; }: alternative
+    # Reverse shells
+    r"\bnc\s+.*-e\s+/bin/",        # netcat reverse shell
+    r">\s*&?\s*/dev/tcp/",         # bash /dev/tcp reverse shell
+    r">\s*&?\s*/dev/udp/",         # bash /dev/udp reverse shell
+    # Code execution
+    r"\beval\b",                    # eval injection
+    r"\bcurl.*\|.*(sh|bash|python|perl)",   # curl piped to interpreter
+    r"\bwget.*\|.*(sh|bash|python|perl)",   # wget piped to interpreter
+    r"\bbase64\b.*\|.*(sh|bash)\b",          # base64 decoded payload
+    r"\bxxd\s+-r\b",               # hex decode payload
+    # Force push protected branches
+    r"\bgit\s+push\s+--force.*origin\s+main",
     r"\bgit\s+push\s+--force.*origin\s+master",
-    r"\bsudo\b",                  # sudo (may prompt for password)
-    r"\bsu\s+-",                 # su
 ]
 
 SAFE_PATTERNS = [
@@ -431,7 +449,6 @@ class AgentExecutor:
         body = parts[2] if len(parts) > 2 else ""
 
         import urllib.request
-        import json as _json
 
         try:
             req = urllib.request.Request(url, method=method)
@@ -440,7 +457,10 @@ class AgentExecutor:
             if body:
                 req.data = body.encode()
 
-            resp = urllib.request.urlopen(req, timeout=30)
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(
+                None, lambda: urllib.request.urlopen(req, timeout=30)
+            )
             resp_body = resp.read().decode()[:self.MAX_OUTPUT_BYTES]
 
             duration = round(asyncio.get_event_loop().time() - start_time, 2)

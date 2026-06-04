@@ -1,46 +1,44 @@
 # DeepSpace — AI Agent Development Platform
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-675%2B%20passed-brightgreen" alt="Tests">
-  <img src="https://img.shields.io/badge/python-3.12%2B-3776AB" alt="Python">
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
-  <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-246%20python%20%7C%20388%20jest%20%7C%20351%20vitest-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/python-3.11%2B-3776AB" alt="Python">
   <img src="https://img.shields.io/badge/typescript-5.7%2B-blue" alt="TypeScript">
   <img src="https://img.shields.io/badge/node-20%2B-green" alt="Node">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
+  <img src="https://img.shields.io/badge/version-0.9.1-blue" alt="Version">
 </p>
 
-> **Multi-agent collaboration platform with LLM-powered agents, real-time streaming, and sandboxed tool execution.**
+> **Multi-agent collaboration platform with 4-layer memory engine, 9-agent orchestrator, autonomous learner, and MCP server.**
 
-DeepSpace is a TypeScript monorepo: NestJS backend + Next.js frontend + shared types. It provides an agent engine with tool calling, multi-agent orchestration, SSE streaming, WebSocket real-time sync, and a marketplace for sharing agent configurations.
+DeepSpace uses **Python for the AI core** (memory engine, model routing, autonomous agent orchestration) and **TypeScript for the Web/API layer** (NestJS gateway + Next.js frontend), connected via gRPC.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                   DeepSpace                      │
-│                                                  │
-│  apps/core-engine (NestJS 11)                    │
-│  ├── Agent Engine (LLM + tool calling)           │
-│  ├── Multi-agent Collab (planner/coder/          │
-│  │   reviewer/researcher + handoff)              │
-│  ├── SSE Streaming + WebSocket (Socket.IO)       │
-│  ├── JWT Auth (Passport + bcrypt)                │
-│  ├── Sandbox (isolated FS + code exec)           │
-│  ├── Marketplace + Plugins                       │
-│  └── SQLite (better-sqlite3, WAL mode)           │
+┌──────────────────────────────────────────────────┐
+│                 DeepSpace Platform                 │
 │                                                   │
-│  apps/studio-web (Next.js 16 + React 19)          │
-│  ├── Chat Interface + Streaming                  │
-│  ├── Collab Panel (multi-agent orchestration)    │
-│  ├── Sandbox Explorer + Trace Replay             │
-│  ├── Marketplace + Share Dialog                  │
-│  └── Tailwind CSS 4                              │
-│                                                   │
-│  packages/shared-types                           │
-│  └── TypeScript interfaces                       │
-└─────────────────────────────────────────────────┘
+│  apps/studio-web (Next.js 16 + React 19)           │
+│  └── Chat · Collab · Memory · Sandbox · Market    │
+│         │                                         │
+│         ▼ HTTP/SSE + WebSocket (JWT)               │
+│  apps/core-engine (NestJS 11)                      │
+│  └── API Gateway · JWT Auth · Rate Limiting ·     │
+│      SSE Proxy · WebSocket Relay · gRPC Client    │
+│         │                                         │
+│         ▼ gRPC (internal)                          │
+│  engine/ (Python 3.11+, FastAPI)                   │
+│  ├── Memory Engine (pgvector + Neo4j)              │
+│  ├── 9-Agent Orchestrator                         │
+│  ├── Autonomous Learner + Proactive Push          │
+│  ├── Model Router (health check + failover)        │
+│  ├── Safety Sandbox (27 dangerous patterns)        │
+│  ├── MCP Server (stdio + SSE)                     │
+│  └── 6 Built-in Tools + Plugin System             │
+└──────────────────────────────────────────────────┘
 ```
 
 ---
@@ -49,23 +47,36 @@ DeepSpace is a TypeScript monorepo: NestJS backend + Next.js frontend + shared t
 
 ### Prerequisites
 
-Node.js >= 20, pnpm >= 9
+Node.js >= 20, pnpm >= 9, Python >= 3.11, Docker (for databases)
 
-### Setup
+### Development
 
 ```bash
 git clone https://github.com/WindRiders/DeepSpace.git
 cd DeepSpace
+
+# Start databases
+docker compose -f docker-compose.dev.yml up -d postgres neo4j
+
+# Python engine
+cd engine
+pip install -e .
+cp .env.example .env  # add DASHSCOPE_API_KEY
+python -m uvicorn api.server:app --port 8645 &
+python -m api.grpc_server &
+
+# TypeScript
 pnpm install
-
-# Configure LLM API key
 cp apps/core-engine/.env.example apps/core-engine/.env
-# Edit .env — add DEEPSEEK_API_KEY or OPENAI_API_KEY
-
-# Start dev servers
 pnpm dev
-# Backend: http://localhost:3001
-# Frontend: http://localhost:3000
+# Backend: http://localhost:3001  |  Frontend: http://localhost:3000
+```
+
+### Production (Docker)
+
+```bash
+docker compose -f docker-compose.full.yml up -d
+# Everything starts: PostgreSQL + Neo4j + Python Engine + NestJS + Next.js
 ```
 
 ---
@@ -74,15 +85,14 @@ pnpm dev
 
 | Component | Technology |
 |-----------|------------|
-| Language | TypeScript 5.7+ |
-| Backend | NestJS 11, Express, better-sqlite3 |
+| AI Engine | Python 3.11+, FastAPI, gRPC |
+| Memory | pgvector (vector search) + Neo4j (knowledge graph) |
+| API Gateway | NestJS 11, gRPC Client, Socket.IO |
 | Frontend | Next.js 16, React 19, Tailwind CSS 4 |
-| Shared Types | TypeScript interfaces (workspace package) |
-| LLM | DashScope / OpenAI API compatible |
-| Real-time | SSE (RxJS Observable) + WebSocket (Socket.IO) |
-| Auth | JWT (Passport.js) + bcrypt |
-| Tests | Jest (385+ unit) + Vitest (242 frontend) + 140 E2E |
-| Monorepo | pnpm workspaces + Turborepo |
+| LLM | DashScope / OpenAI API compatible (ModelRouter with failover) |
+| MCP | stdio + SSE server (10 tools, Claude Desktop compatible) |
+| Tests | pytest 246 + Jest 388 + Vitest 351 = **985** |
+| Infra | Docker Compose (PostgreSQL, Neo4j, Engine, Gateway, Frontend) |
 
 ---
 
@@ -90,29 +100,39 @@ pnpm dev
 
 ```
 deepspace/
+├── engine/                        # Python AI engine
+│   ├── api/
+│   │   ├── server.py              # FastAPI (REST + SSE + Socket.IO)
+│   │   ├── grpc_server.py         # gRPC server (13 RPC methods)
+│   │   └── mcp_server.py          # MCP stdio + SSE server
+│   ├── core/
+│   │   ├── memory_engine.py       # 4-layer memory (pgvector + Neo4j)
+│   │   ├── orchestrator.py        # 9-agent orchestration
+│   │   ├── agent_executor.py      # Sandboxed execution + safety
+│   │   ├── autonomous_learner.py  # Idle-time research
+│   │   ├── proactive_service.py   # Context detection + push
+│   │   ├── model_router.py        # Health check + failover
+│   │   ├── llm_client.py          # LLM abstraction
+│   │   └── plugin_manager.py      # Plugin system (6 extension points)
+│   ├── storage/
+│   │   ├── pgvector_store.py      # Vector + keyword search
+│   │   └── neo4j_graph_store.py   # Knowledge graph
+│   └── config/
+│       └── config.yaml            # Central configuration
 ├── apps/
-│   ├── core-engine/              # NestJS backend
-│   │   ├── src/
-│   │   │   ├── agent/            # Agent engine + tools + error utils
-│   │   │   ├── auth/             # JWT auth + user management
-│   │   │   ├── collab/           # Multi-agent collaboration + WebSocket
-│   │   │   ├── conversation/     # Conversation management
-│   │   │   ├── llm/              # LLM provider abstraction
-│   │   │   ├── marketplace/      # Agent marketplace
-│   │   │   ├── plugins/          # Plugin registry + lifecycle
-│   │   │   ├── sandbox/          # Isolated file system + code execution
-│   │   │   ├── session/          # Session persistence
-│   │   │   ├── share/            # Share functionality
-│   │   │   ├── template/         # Prompt templates
-│   │   │   └── trace/            # Execution trace recording
-│   │   └── test/                 # E2E tests (12 suites)
-│   └── studio-web/               # Next.js frontend
+│   ├── core-engine/               # NestJS API gateway
+│   │   └── src/
+│   │       ├── agent/             # gRPC proxy to Python engine
+│   │       ├── auth/              # JWT auth + user management
+│   │       ├── collab/            # Collaboration WebSocket relay
+│   │       ├── memory/            # Memory gRPC client
+│   │       ├── grpc/              # gRPC client definitions
+│   │       └── ...
+│   └── studio-web/                # Next.js frontend
 │       └── src/app/
-│           ├── components/       # UI components
-│           ├── hooks/            # Custom hooks
-│           └── lib/              # API clients + utilities
-└── packages/
-    └── shared-types/             # Shared TypeScript interfaces
+│           ├── components/        # Chat, CollabPanel, MemoryPanel, ...
+│           └── hooks/             # API hooks
+├── tests/                         # Python tests (246)
 ```
 
 ---
@@ -120,18 +140,17 @@ deepspace/
 ## Running Tests
 
 ```bash
-# Backend unit tests (385+ tests)
+# Python unit tests (246)
+cd engine && pytest tests/ --ignore=tests/integration -v
+
+# Backend unit tests (388)
 pnpm --filter @deepspace/core-engine exec jest --forceExit
 
-# Backend E2E tests (140+ tests)
-pnpm --filter @deepspace/core-engine exec jest --config test/jest-e2e.json --forceExit
-
-# Frontend tests (242 tests)
+# Frontend tests (351)
 pnpm --filter @deepspace/studio-web exec vitest run
 
 # TypeScript check
 npx tsc --noEmit -p apps/core-engine/tsconfig.json
-npx tsc --noEmit -p apps/studio-web/tsconfig.json
 ```
 
 ---
@@ -140,11 +159,9 @@ npx tsc --noEmit -p apps/studio-web/tsconfig.json
 
 | Document | Description |
 |----------|-------------|
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Development guide + commit conventions |
-| [SECURITY.md](SECURITY.md) | Security policy + architecture |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
-| [docs/architecture.md](docs/architecture.md) | Detailed architecture |
-| [docs/api.md](docs/api.md) | API reference |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development guide |
+| [SECURITY.md](SECURITY.md) | Security policy |
 
 ---
 

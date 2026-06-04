@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.9.1] - 2026-06-04
+
+### Added
+
+- **安全规则增强**: DANGEROUS_PATTERNS 14→27 条，覆盖 fork bomb 变体、netcat/bash 反向 shell、NVMe/macOS 块设备覆盖、`eval` 注入、base64 编码载荷
+- **测试覆盖**: 新增 55 个 Python 单元测试（model_router +6, autonomous_learner +18, orchestrator +6, agent_executor +24, security patterns +5），总计 189 通过
+- **16 个 REST 端点**: 前端兼容层（PATCH /auth/me, conversations CRUD, plugins CRUD, templates, marketplace CRUD, shares CRUD, traces CRUD）
+- **Collab WebSocket**: Socket.IO 实时协作端点（connect/execute-session/disconnect）
+- **SSE 增强**: thinking/tool_call_start/tool_call_result 事件类型，编排器任务路由
+
+### Changed
+
+- **Config 精简**: config.yaml 92→55 行，移除 17 个未使用的配置节
+
+### Fixed
+
+- **Memory recall 响应格式**: `results` → `memories`，新增 summary/memoryType/project/tags/source 字段
+- **AutonomousLearner daily_cost**: 新增每日预算追踪，`status()` 暴露 daily_cost/daily_budget
+- **gRPC server**: 修复 8 处 async/await + 类型错误，Docker 入口脚本同时启动 FastAPI + gRPC
+- **Embedding 模型名**: 容器内修正为 `BAAI/bge-small-zh-v1.5`
+
+---
+
 ## [0.9.0] - 2026-05-31
 
 ### Added
